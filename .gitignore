@@ -1,0 +1,29 @@
+*.o
+.env
+.claude/
+.tokensave
+.serena/
+.venv/
+__pycache__/
+
+# Zig package dependencies
+.zig-pkg/
+zig-pkg/
+
+# Zig build artifacts and caches
+.zig-cache/
+zig-cache/
+zig-out/
+
+# ROM sets are never committed. A set is a directory or a zip of board ROMs,
+# and the board file that goes with it is the user's too — see DESIGN.md §8.
+roms/
+
+# Save states, EEPROM contents, and screenshots, written beside the ROM set.
+*.st[0-8]
+*.nv
+*.png
+
+# Reference implementations fetched by tools/, test-only and never linked
+# into the emulator.
+testdata/

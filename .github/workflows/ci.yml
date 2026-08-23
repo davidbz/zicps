@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: "0.16.0"
+      - name: Check formatting
+        run: zig fmt --check src/ build.zig
+
+  lint-actions:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+
+  test:
+    name: Test / ${{ matrix.os }} / Zig ${{ matrix.zig }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        zig: ["0.16.0"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: ${{ matrix.zig }}
+      # raylib comes in with the frontend in M5. Until it is in the manifest
+      # there is nothing to install headers for; restore this step with it,
+      # since raylib links against X11/GL on Linux and the macOS and Windows
+      # runners already ship what it needs:
+      #   - name: Install raylib build dependencies
+      #     if: runner.os == 'Linux'
+      #     run: |
+      #       sudo apt-get update
+      #       sudo apt-get install -y libgl1-mesa-dev libx11-dev libxrandr-dev \
+      #         libxinerama-dev libxcursor-dev libxi-dev libasound2-dev
+      # Cache the Zig build cache to speed up incremental builds.
+      # Key includes the zon hash so a dep change busts it correctly.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            .zig-cache
+            ~/.cache/zig
+            ~/Library/Caches/zig
+            ~/AppData/Local/zig
+          key: zig-${{ runner.os }}-${{ matrix.zig }}-${{ hashFiles('build.zig.zon') }}
+          restore-keys: |
+            zig-${{ runner.os }}-${{ matrix.zig }}-
+            zig-${{ runner.os }}-
+      # Nothing to fetch yet: the in-repo test ROM arrives with M1 and the
+      # QSound differential reference with M4. Both fetches belong here, ahead
+      # of `check`, because each suite skips itself when its data is missing —
+      # a fetch that runs late is a green build that tested less than it looks.
+      - name: Compile check
+        run: zig build check
+      - name: Run tests
+        run: zig build test
+
+  # zigesis ran Nemesis' VDPFIFOTesting as a second job here, pinning a score
+  # per page and failing when one moved in either direction. Its analogue is
+  # M2's: the in-repo test ROM, walked headless, scored the same way.
