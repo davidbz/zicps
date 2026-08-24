@@ -603,6 +603,8 @@ const star_column_step = 32;
 const star_rows_per_code = 8;
 const star_row_pixels = 16;
 const star_pos_mask = 0x1ff;
+/// A star byte is eight pixels of the low plane, highest bit first.
+const star_byte_pixels = 8;
 /// An entry whose low five bits are all ones is not a star; otherwise they are
 /// how far into its column the star sits.
 const star_no_star = 0x0f;
@@ -614,6 +616,7 @@ const star_color_shift = 1;
 const star_twinkle_frames = 16;
 const star_twinkle_span = 16;
 const star_twinkle_odd = 15;
+const star_twinkle_alt = 0x80;
 
 /// One field's registers, half of the star row, and palette page. The enables
 /// cross over: the bit MAME's tables call stars1 turns on the field that
@@ -652,7 +655,7 @@ fn drawStarfield(v: *Video, b: *const board.Board, gfx: []const u8, l: *Line, li
         const dot = (column * star_column_step -% v.a[f.x_reg / 2] + (star & star_x_mask)) & star_pos_mask;
         if (dot < first_visible_dot or dot >= first_visible_dot + width) continue;
 
-        const span: u32 = if (star & 0x80 != 0) star_twinkle_odd else star_twinkle_span;
+        const span: u32 = if (star & star_twinkle_alt != 0) star_twinkle_odd else star_twinkle_span;
         const entry = (star & star_color_mask) >> star_color_shift;
         l.color[dot - first_visible_dot] = v.colors[f.page * palette_page_entries + entry + twinkle % span];
     }
@@ -661,9 +664,16 @@ fn drawStarfield(v: *Video, b: *const board.Board, gfx: []const u8, l: *Line, li
 /// The star bytes are graphics ROM read as bytes rather than as tiles, and this
 /// build keeps graphics decoded: the byte is the low plane of the eight pixels
 /// it was unpacked into, highest bit first.
+///
+/// Graphics that are not there read as no star. `gfxPixel` answers a code past
+/// the end of the ROM with the transparent pen, whose low bit is set, so going
+/// through it here would turn an unpopulated bank into a wall of stars.
 fn starByte(gfx: []const u8, at: u32) u32 {
+    if (at + star_byte_pixels > gfx.len) return star_no_star;
     var bits: u32 = 0;
-    for (0..8) |i| bits |= @as(u32, gfxPixel(gfx, at + @as(u32, @intCast(i))) & 1) << @intCast(7 - i);
+    for (0..star_byte_pixels) |i| {
+        bits |= @as(u32, gfx[at + i] & 1) << @intCast(star_byte_pixels - 1 - i);
+    }
     return bits;
 }
 
@@ -1264,4 +1274,17 @@ test "the raster counters reload at the top of the frame and fire at their line"
     try testing.expect(!rasterDue(&v, &b, 0));
     for (1..50) |line| _ = rasterDue(&v, &b, @intCast(line));
     try testing.expect(rasterDue(&v, &b, 50));
+}
+
+test "graphics that are not there are not stars either" {
+    var v = Video{};
+    const b = plainBoard();
+    // Short enough that the star codes of the later columns run off the end.
+    var gfx: [0x8000]u8 = undefined;
+    noStars(&gfx);
+    ready(&v);
+
+    v.b[test_layer_control / 2] = test_order | test_enables[@intFromEnum(board.Enable.stars2)];
+    renderLine(&v, &b, &gfx, first_visible_line, 0);
+    for (0..width) |x| try testing.expectEqual(@as(u32, background_entry), v.fb[x]);
 }

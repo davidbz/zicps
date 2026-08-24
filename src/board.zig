@@ -158,8 +158,9 @@ pub const Diag = struct {
     /// Truncates rather than fails: a message that does not fit is still worth
     /// more than no message.
     pub fn set(d: *Diag, comptime fmt: []const u8, args: anytype) void {
-        const out = std.fmt.bufPrint(&d.buf, fmt, args) catch d.buf[0..];
-        d.len = out.len;
+        var w = std.Io.Writer.fixed(&d.buf);
+        w.print(fmt, args) catch {};
+        d.len = w.buffered().len;
     }
 
     fn say(d: *Diag, comptime fmt: []const u8, args: anytype) error{BadBoardFile} {
@@ -248,44 +249,24 @@ pub fn parse(text: []const u8, diag: *Diag) Error!Board {
 /// The keys without which the machine cannot be built at all. Named together
 /// rather than one per run, so a hand-written file is finished in one pass.
 fn require(b: *const Board, diag: *Diag) Error!void {
-    var missing: [8][]const u8 = undefined;
-    var n: usize = 0;
-    if (b.layer_control == null) {
-        missing[n] = "layer_control";
-        n += 1;
-    }
-    for (b.priority) |p| {
-        if (p == null) {
-            missing[n] = "priority";
-            n += 1;
-            break;
-        }
-    }
-    if (b.palette_control == null) {
-        missing[n] = "palette_control";
-        n += 1;
-    }
-    // Not one mask each — a board with no starfields really does have two zeroes
-    // — but all five zero means nothing would ever be drawn, silently.
-    if (std.mem.allEqual(u16, &b.layer_enable, 0)) {
-        missing[n] = "layer_enable";
-        n += 1;
-    }
-    if (b.range_count == 0) {
-        missing[n] = "gfx_bank";
-        n += 1;
-    }
-    if (b.rom_count == 0) {
-        missing[n] = "program";
-        n += 1;
-    }
-    if (n == 0) return needsKabuki(b, diag);
+    const needed = [_]struct { []const u8, bool }{
+        .{ "layer_control", b.layer_control != null },
+        .{ "priority", std.mem.indexOfScalar(Reg, &b.priority, null) == null },
+        .{ "palette_control", b.palette_control != null },
+        // Not one mask each — a board with no starfields really does have two
+        // zeroes — but all five zero means nothing would ever be drawn.
+        .{ "layer_enable", !std.mem.allEqual(u16, &b.layer_enable, 0) },
+        .{ "gfx_bank", b.range_count != 0 },
+        .{ "program", b.rom_count != 0 },
+    };
 
     var buf: [128]u8 = undefined;
     var w = std.Io.Writer.fixed(&buf);
-    for (missing[0..n], 0..) |name, i| {
-        w.print("{s}{s}", .{ if (i == 0) "" else ", ", name }) catch break;
+    for (needed) |key| {
+        if (key[1]) continue;
+        w.print("{s}{s}", .{ if (w.buffered().len == 0) "" else ", ", key[0] }) catch break;
     }
+    if (w.buffered().len == 0) return needsKabuki(b, diag);
     return diag.say("board file is missing: {s}", .{w.buffered()});
 }
 

@@ -1,4 +1,4 @@
-//! The program. At M0 it is the headless runner and nothing else: render N
+//! The program. Until M5 it is the headless runner and nothing else: render N
 //! frames with no window, hash the machine, exit. DESIGN.md §6.1 calls this
 //! the backbone of testing rather than a debug feature, which is why it is the
 //! first thing that exists and has to keep working forever.
@@ -77,7 +77,11 @@ pub fn main(init: std.process.Init) !void {
     var every_frame = false;
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--frames")) {
-            frames = try std.fmt.parseInt(u32, args.next() orelse "60", 10);
+            const count = args.next() orelse return error.MissingFrameCount;
+            frames = std.fmt.parseInt(u32, count, 10) catch {
+                std.debug.print("--frames wants a number of frames, got `{s}`\n", .{count});
+                fail();
+            };
         } else if (std.mem.eql(u8, arg, "--board")) {
             board_path = args.next() orelse return error.MissingBoardPath;
         } else if (std.mem.eql(u8, arg, "--replay")) {
@@ -177,12 +181,14 @@ fn report(c: *const cps.Cps, cpu: *const scheduler.Cpu, frame: u32) void {
     std.debug.print("frame {d} hash={x:0>16}\n", .{ frame, scheduler.hash(c, cpu) });
 }
 
-/// `sets/dino.zip` and `sets/dino` both look beside themselves for
-/// `sets/dino.board`.
+/// `sets/dino.zip`, `sets/dino` and the `sets/dino/` a shell completes a
+/// directory to all look beside themselves for `sets/dino.board`.
 fn beside(buf: []u8, path: []const u8, suffix: []const u8) ![]const u8 {
-    const dot = std.mem.lastIndexOfScalar(u8, std.fs.path.basename(path), '.');
-    const stem = if (dot) |d| path[0 .. path.len - (std.fs.path.basename(path).len - d)] else path;
-    return std.fmt.bufPrint(buf, "{s}{s}", .{ stem, suffix });
+    const trimmed = std.mem.trimEnd(u8, path, std.fs.path.sep_str);
+    const name = std.fs.path.basename(trimmed);
+    const dot = std.mem.lastIndexOfScalar(u8, name, '.') orelse
+        return std.fmt.bufPrint(buf, "{s}{s}", .{ trimmed, suffix });
+    return std.fmt.bufPrint(buf, "{s}{s}", .{ trimmed[0 .. trimmed.len - (name.len - dot)], suffix });
 }
 
 fn usage() void {
@@ -222,4 +228,9 @@ test "the board file is looked for beside the set, under the set's own name" {
     try testing.expectEqualStrings("sets/dino.board", try beside(&buf, "sets/dino", ".board"));
     // A dot in a directory on the way there is not the set's extension.
     try testing.expectEqualStrings("my.sets/dino.board", try beside(&buf, "my.sets/dino", ".board"));
+}
+
+test "a set named with a trailing slash still finds its board file" {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    try testing.expectEqualStrings("sets/dino.board", try beside(&buf, "sets/dino/", ".board"));
 }
