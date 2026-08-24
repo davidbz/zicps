@@ -60,7 +60,6 @@ fn romImage() [program_bytes]u8 {
     return file;
 }
 
-/// A 16-bit ROM holds each word low byte first, which is what `word` mode undoes.
 fn swapWords(file: []u8) void {
     var i: usize = 0;
     while (i + 1 < file.len) : (i += 2) std.mem.swap(u8, &file[i], &file[i + 1]);

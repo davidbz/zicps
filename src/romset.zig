@@ -140,22 +140,22 @@ fn place(region: []u8, rom: board.Rom, bytes: []const u8) void {
 pub const bytes_per_row = 8;
 pub const pixels_per_row = 16;
 pub const pixels_per_byte = pixels_per_row / bytes_per_row;
+/// Each half of the row is four bit planes over eight pixels.
+const plane_count = bytes_per_row / 2;
+const half_row_pixels = pixels_per_row / 2;
 
-/// The four planes are in descending significance: the high bit of a pixel
-/// comes from the last byte of its group of four.
-fn nibble(planes: *const [4]u8, bit: u3) u8 {
-    return @as(u8, (planes[3] >> bit) & 1) << 3 |
-        @as(u8, (planes[2] >> bit) & 1) << 2 |
-        @as(u8, (planes[1] >> bit) & 1) << 1 |
-        @as(u8, (planes[0] >> bit) & 1);
+fn nibble(planes: *const [plane_count]u8, bit: u3) u8 {
+    var pen: u8 = 0;
+    for (planes, 0..) |plane, p| pen |= @as(u8, (plane >> bit) & 1) << @intCast(p);
+    return pen;
 }
 
 /// Expands one row. Pixel 0 is the *high* bit of each plane byte.
 pub fn decodeRow(src: *const [bytes_per_row]u8, dst: *[pixels_per_row]u8) void {
-    for (0..8) |x| {
-        const bit: u3 = @intCast(7 - x);
-        dst[x] = nibble(src[0..4], bit);
-        dst[8 + x] = nibble(src[4..8], bit);
+    for (0..half_row_pixels) |x| {
+        const bit: u3 = @intCast(half_row_pixels - 1 - x);
+        dst[x] = nibble(src[0..plane_count], bit);
+        dst[half_row_pixels + x] = nibble(src[plane_count..][0..plane_count], bit);
     }
 }
 
@@ -199,7 +199,7 @@ const Source = struct {
         while (it.next() catch |err| return fail(s.diag, "the zip's directory is damaged: {t}", .{err})) |entry| {
             if (entry.filename_len > found.len) continue;
             const in_zip = found[0..entry.filename_len];
-            seek(&fr, entry.header_zip_offset + @sizeOf(std.zip.CentralDirectoryFileHeader), s.diag) catch |err| return err;
+            try seek(&fr, entry.header_zip_offset + @sizeOf(std.zip.CentralDirectoryFileHeader), s.diag);
             fr.interface.readSliceAll(in_zip) catch |err|
                 return fail(s.diag, "the zip's directory is damaged: {t}", .{err});
             if (!std.ascii.eqlIgnoreCase(std.fs.path.basename(in_zip), name)) continue;
@@ -331,17 +331,29 @@ const tiny_board =
     \\gfx     = 0x000006 0x08 word64 g4.bin
 ;
 
-fn writeTinySet(dir: std.Io.Dir) !void {
-    const io = testing.io;
-    for ([_][]const u8{ "even.bin", "odd.bin" }, [_]u8{ 0xa0, 0xb0 }) |name, base| {
-        var bytes: [0x10]u8 = undefined;
-        for (&bytes, 0..) |*byte, i| byte.* = base + @as(u8, @intCast(i));
-        try dir.writeFile(io, .{ .sub_path = name, .data = &bytes });
+/// The tiny set's files, in the order `tinyChip` numbers them: two program
+/// halves, then the four graphics chips.
+const tiny_names = [_][]const u8{ "even.bin", "odd.bin", "g1.bin", "g2.bin", "g3.bin", "g4.bin" };
+const tiny_program_chips = 2;
+
+/// One chip's bytes, written into `buf` so that nothing here allocates. Every
+/// byte says which chip it came from and how far into it, which is what makes a
+/// misplaced load visible in the assertions.
+fn tinyChip(chip: usize, buf: *[0x10]u8) []const u8 {
+    if (chip < tiny_program_chips) {
+        const base: u8 = if (chip == 0) 0xa0 else 0xb0;
+        for (buf, 0..) |*byte, i| byte.* = base + @as(u8, @intCast(i));
+        return buf;
     }
-    for ([_][]const u8{ "g1.bin", "g2.bin", "g3.bin", "g4.bin" }, 0..) |name, chip| {
-        var bytes: [8]u8 = undefined;
-        for (&bytes, 0..) |*byte, i| byte.* = @intCast(chip * 0x10 + i);
-        try dir.writeFile(io, .{ .sub_path = name, .data = &bytes });
+    const gfx_chip = chip - tiny_program_chips;
+    for (buf[0..8], 0..) |*byte, i| byte.* = @intCast(gfx_chip * 0x10 + i);
+    return buf[0..8];
+}
+
+fn writeTinySet(dir: std.Io.Dir) !void {
+    var buf: [0x10]u8 = undefined;
+    for (tiny_names, 0..) |name, chip| {
+        try dir.writeFile(testing.io, .{ .sub_path = name, .data = tinyChip(chip, &buf) });
     }
 }
 
@@ -414,19 +426,11 @@ fn tinyZip(gpa: std.mem.Allocator) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
 
-    const names = [_][]const u8{ "even.bin", "odd.bin", "g1.bin", "g2.bin", "g3.bin", "g4.bin" };
-    var offsets: [names.len]u32 = undefined;
+    var offsets: [tiny_names.len]u32 = undefined;
+    var buf: [0x10]u8 = undefined;
 
-    for (names, &offsets, 0..) |name, *offset, chip| {
-        var bytes: [0x10]u8 = undefined;
-        const data = if (chip < 2) blk: {
-            for (&bytes, 0..) |*byte, i| byte.* = @as(u8, if (chip == 0) 0xa0 else 0xb0) + @as(u8, @intCast(i));
-            break :blk bytes[0..0x10];
-        } else blk: {
-            for (bytes[0..8], 0..) |*byte, i| byte.* = @intCast((chip - 2) * 0x10 + i);
-            break :blk bytes[0..8];
-        };
-
+    for (tiny_names, &offsets, 0..) |name, *offset, chip| {
+        const data = tinyChip(chip, &buf);
         offset.* = @intCast(out.items.len);
         const local = std.zip.LocalFileHeader{
             .signature = std.zip.local_file_header_sig,
@@ -447,14 +451,9 @@ fn tinyZip(gpa: std.mem.Allocator) ![]u8 {
     }
 
     const cd_start: u32 = @intCast(out.items.len);
-    for (names, offsets, 0..) |name, offset, chip| {
-        const len: u32 = if (chip < 2) 0x10 else 8;
-        var bytes: [0x10]u8 = undefined;
-        if (chip < 2) {
-            for (&bytes, 0..) |*byte, i| byte.* = @as(u8, if (chip == 0) 0xa0 else 0xb0) + @as(u8, @intCast(i));
-        } else {
-            for (bytes[0..8], 0..) |*byte, i| byte.* = @intCast((chip - 2) * 0x10 + i);
-        }
+    for (tiny_names, offsets, 0..) |name, offset, chip| {
+        const data = tinyChip(chip, &buf);
+        const len: u32 = @intCast(data.len);
         const header = std.zip.CentralDirectoryFileHeader{
             .signature = std.zip.central_file_header_sig,
             .version_made_by = 10,
@@ -463,7 +462,7 @@ fn tinyZip(gpa: std.mem.Allocator) ![]u8 {
             .compression_method = .store,
             .last_modification_time = 0,
             .last_modification_date = 0,
-            .crc32 = std.hash.Crc32.hash(bytes[0..len]),
+            .crc32 = std.hash.Crc32.hash(data),
             .compressed_size = len,
             .uncompressed_size = len,
             .filename_len = @intCast(name.len),
@@ -482,8 +481,8 @@ fn tinyZip(gpa: std.mem.Allocator) ![]u8 {
         .signature = std.zip.end_record_sig,
         .disk_number = 0,
         .central_directory_disk_number = 0,
-        .record_count_disk = names.len,
-        .record_count_total = names.len,
+        .record_count_disk = tiny_names.len,
+        .record_count_total = tiny_names.len,
         .central_directory_size = @intCast(out.items.len - cd_start),
         .central_directory_offset = cd_start,
         .comment_len = 0,

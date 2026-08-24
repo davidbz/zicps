@@ -46,9 +46,7 @@ comptime {
 }
 
 /// The refresh rate the picture actually runs at, as a ratio, so nothing in the
-/// emulator has to round it. 8 MHz over 134,144 dots is 59.6374 Hz — DESIGN.md
-/// §3.3 said 59.6295, which is an arithmetic slip; MAME's own comment on the
-/// same numbers says 59.63.
+/// emulator has to round it: 8 MHz over 134,144 dots is 59.6374 Hz.
 pub const refresh_num = pixel_hz;
 pub const refresh_den = video.dots_per_line * video.lines_per_frame;
 
@@ -117,9 +115,8 @@ pub fn reset(c: *cps.Cps, cpu: *m68k.Cpu) void {
 }
 
 /// Everything a frame can have changed, in one number: what `--frames N` prints
-/// and what a replay is compared on (DESIGN.md §6.1). The framebuffer alone is
-/// not enough at M0 — nothing draws yet, so a picture-only hash would be the
-/// same on every run of every set and would prove nothing.
+/// and what a replay is compared on (DESIGN.md §6.1). More than the picture, so
+/// that a divergence which has not reached the screen yet is still caught.
 pub fn hash(c: *const cps.Cps, cpu: *const m68k.Cpu) u64 {
     var h = std.hash.Wyhash.init(0);
     h.update(std.mem.sliceAsBytes(&c.v.fb));
