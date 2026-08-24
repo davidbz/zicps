@@ -36,6 +36,13 @@ You'll need [Zig](https://ziglang.org/) 0.16.0.
 zig build test
 ```
 
+There is also a scoreboard over the test ROM this project builds for itself,
+which fails when any page of it draws a pixel more or less than it used to:
+
+```
+zig build testrom
+```
+
 Once there's a window to open, Linux will also need the usual X11/GL packages
 for [raylib](https://www.raylib.com/); that arrives with the frontend milestone.
 

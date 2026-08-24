@@ -129,6 +129,14 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    // The scoreboard of DESIGN.md §9: the acceptance ROM's pages, walked and
+    // scored, one line each. It is the system tests filtered down to that one
+    // test rather than a file of its own — the ROM that has to be built to run
+    // it is already there.
+    const scoreboard = b.addTest(.{ .root_module = system_tests, .filters = &.{"scoreboard"} });
+    const testrom_step = b.step("testrom", "Score every page of the acceptance ROM");
+    testrom_step.dependOn(&b.addRunArtifact(scoreboard).step);
+
     const modules = [_]*std.Build.Module{
         board, romset, video, cps, scheduler, input, config, audio, snow, exe_module, system_tests,
     };

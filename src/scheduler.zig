@@ -52,9 +52,11 @@ comptime {
 pub const refresh_num = pixel_hz;
 pub const refresh_den = video.dots_per_line * video.lines_per_frame;
 
-/// Vblank, on the line after the last visible one. The board also has a raster
-/// interrupt at level 4, and both together are level 6; those are M2's.
+/// Vblank on the line after the last visible one, the raster counters at
+/// whatever line they were programmed for, and — when the two land together —
+/// both pins at once, which the 68000 reads as level 6.
 pub const vint_level = 2;
+pub const rint_level = 4;
 pub const vblank_line = video.first_visible_line + video.height;
 
 /// Runs one whole frame, line by line.
@@ -92,13 +94,20 @@ fn runLine(c: *cps.Cps, cpu: *m68k.Cpu) void {
     // Line, then interrupts: what the CPU wrote during a line is on screen for
     // that line, and an interrupt raised at the end of one is taken from the
     // start of the next.
-    video.renderLine(&c.v, &c.board, c.rom.gfx, c.line);
+    video.renderLine(&c.v, &c.board, c.rom.gfx, c.line, c.frame);
 
-    // ponytail: vblank is dropped after one line if the CPU never took it,
-    // where the real board holds it until the acknowledge cycle. A game that
-    // masks level 2 across all 768 cycles of line 240 misses that frame. Add
-    // an acknowledge callback to z68k if one ever turns out to.
-    Core.setIpl(cpu, if (c.line == vblank_line) vint_level else 0);
+    // The object list is double-buffered, and vblank is when the chip takes its
+    // copy: sprites written during a frame are drawn in the next one.
+    if (c.line == vblank_line) video.latchObjects(&c.v);
+
+    // ponytail: an interrupt is dropped after one line if the CPU never took
+    // it, where the real board holds it until the acknowledge cycle. A game
+    // that masks the level across all 768 cycles of the line misses that
+    // frame. Add an acknowledge callback to z68k if one ever turns out to.
+    var level: u3 = 0;
+    if (video.rasterDue(&c.v, &c.board, c.line)) level |= rint_level;
+    if (c.line == vblank_line) level |= vint_level;
+    Core.setIpl(cpu, level);
 }
 
 /// Fills the reset vector and puts the 68000 on it.
