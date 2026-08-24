@@ -124,6 +124,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "board", .module = board },
             .{ .name = "romset", .module = romset },
             .{ .name = "cps", .module = cps },
+            .{ .name = "video", .module = video },
             .{ .name = "scheduler", .module = scheduler },
         },
     });

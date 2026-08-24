@@ -226,7 +226,7 @@ pub fn write8(c: *Cps, addr: u24, value: u8) void {
 fn poke(c: *Cps, addr: u24, value: u16, mask: u16) void {
     switch (addr) {
         coinctrl_lo...coinctrl_hi => merge(&c.coin_control, value, mask),
-        cps_a_lo...cps_a_hi => video.writeA(&c.v, @truncate(addr - cps_a_lo), value, mask),
+        cps_a_lo...cps_a_hi => video.writeA(&c.v, &c.board, @truncate(addr - cps_a_lo), value, mask),
         cps_b_lo...cps_b_hi => video.writeB(&c.v, @truncate(addr - cps_b_lo), value, mask),
         gfxram_lo...gfxram_hi => pokeBytes(&c.v.gfxram, addr - gfxram_lo, value, mask),
         // Byte-wide, and only the low lane is wired, so an even-address byte

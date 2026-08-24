@@ -335,7 +335,9 @@ positions; the row-scroll table offset; and a video control word carrying
 flip-screen and the row-scroll enable.
 
 Six layers compose the picture: three tilemaps — scroll1 of 8x8 tiles, scroll2
-of 16x16, scroll3 of 32x32, each 512 pixels wide — the object (sprite) layer,
+of 16x16, scroll3 of 32x32, each name table 64 tiles square, so 512, 1024 and
+2048 pixels wide respectively (M1 correction: this said 512 for all three) — the
+object (sprite) layer,
 and two starfields. Their order, their enables, and the four priority masks that
 decide which tilemap pixels cut through sprites live in the CPS-B file.
 
@@ -532,6 +534,37 @@ framebuffer; vblank at level 2.
 Acceptance: the in-repo test ROM (§10) draws its tilemaps and matches pinned
 line hashes; unit tests that poke graphics RAM directly cover tile fetch,
 scrolling, and the palette quirk without needing a ROM at all.
+
+**Ceilings left behind.** One correction to this document, made where it
+belongs: §7.1 said the three tilemaps are each 512 pixels wide. All three name
+tables are 64 tiles square, so they are 512, 1024 and 2048 pixels wide.
+
+What M1 deliberately does not do, and where each is picked up:
+
+- **The layer order is fixed: scroll3, then scroll2, then scroll1.** The CPS-B
+  layer control picks the real order out of four two-bit fields, the layer
+  enables gate each one, and the video control word gates scroll2 and scroll3
+  again. All of it is read from the board file already and none of it is
+  consulted; it lands with sprites at M2, because the order only means anything
+  once there is a sprite layer to interleave.
+- **No priority masks, no sprites, no starfields, no row scroll, no flip
+  screen, no raster interrupt.** Every one of them is M2's.
+- **Vblank is held for one line, not until the acknowledge cycle.** The real
+  board drops IPL1 when the 68000 acknowledges the interrupt; z68k has no
+  acknowledge hook, so the line after vblank is stepped instruction by
+  instruction and the pin is dropped the moment the vector is entered. That is
+  exact for a handler that runs at all, and wrong only for a game that masks
+  level 2 across all 768 cycles of line 240 — it misses that frame. An
+  acknowledge callback in z68k would settle it properly.
+- **The palette is copied on the write to the base register and nowhere else.**
+  That is what §7.1 describes and what the hardware is understood to do, but the
+  timing of the copy against the beam is not modelled: a game that writes the
+  base register mid-frame gets the whole new palette from the top of the frame.
+- **The in-repo test ROM is hand-emitted 68000 opcodes.** §10 calls for a ROM
+  built with CCPS; the toolchain is not in the tree, and a nine-instruction
+  program walking a table of writes proves the same path. The CCPS build arrives
+  with the milestone that needs a ROM to *report* something — sprites and
+  QSound — rather than just to draw.
 
 ### M2: Video II — sprites, priority, raster
 

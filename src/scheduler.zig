@@ -52,6 +52,11 @@ comptime {
 pub const refresh_num = pixel_hz;
 pub const refresh_den = video.dots_per_line * video.lines_per_frame;
 
+/// Vblank, on the line after the last visible one. The board also has a raster
+/// interrupt at level 4, and both together are level 6; those are M2's.
+pub const vint_level = 2;
+pub const vblank_line = video.first_visible_line + video.height;
+
 /// Runs one whole frame, line by line.
 pub fn runFrame(c: *cps.Cps, cpu: *m68k.Cpu) void {
     c.line = 0;
@@ -66,8 +71,34 @@ fn runLine(c: *cps.Cps, cpu: *m68k.Cpu) void {
     // A line whose predecessor overran by more than a whole line's budget owes
     // the difference forward rather than running backwards.
     const budget = cpu_per_line -| c.cpu_over;
-    const ran = Core.run(cpu, c, budget);
+    const start = cpu.cycles;
+
+    // The interrupt is a level held on a pin, and the board drops it when the
+    // 68000 acknowledges. z68k has no acknowledge hook, so a line with one
+    // still on the pin is stepped rather than run, and the pin is dropped the
+    // instant the vector is entered — otherwise a handler that returns inside
+    // the same line takes the same vblank over and over.
+    while (cpu.pending_ipl != 0 and cpu.cycles -% start < budget) {
+        const takeable = cpu.pending_ipl > cpu.sr.ipl;
+        Core.step(cpu, c);
+        if (takeable) Core.setIpl(cpu, 0);
+    }
+    const stepped = cpu.cycles -% start;
+    if (stepped < budget) _ = Core.run(cpu, c, budget - stepped);
+
+    const ran = cpu.cycles -% start;
     c.cpu_over = c.cpu_over + ran - cpu_per_line;
+
+    // Line, then interrupts: what the CPU wrote during a line is on screen for
+    // that line, and an interrupt raised at the end of one is taken from the
+    // start of the next.
+    video.renderLine(&c.v, &c.board, c.rom.gfx, c.line);
+
+    // ponytail: vblank is dropped after one line if the CPU never took it,
+    // where the real board holds it until the acknowledge cycle. A game that
+    // masks level 2 across all 768 cycles of line 240 misses that frame. Add
+    // an acknowledge callback to z68k if one ever turns out to.
+    Core.setIpl(cpu, if (c.line == vblank_line) vint_level else 0);
 }
 
 /// Fills the reset vector and puts the 68000 on it.
@@ -150,6 +181,49 @@ test "a frame runs a frame's worth of cycles, and the remainder carries" {
     const total = cpu.cycles - start;
     try testing.expect(total >= want * 11);
     try testing.expect(total - want * 11 < cpu_per_line);
+}
+
+/// The same spin, but with the interrupt mask down and a level 2 handler that
+/// counts the vblanks in the first word of RAM.
+///
+///     0x400: move.w #$2000, sr   ; supervisor, mask 0
+///     0x404: bra.b  -2
+///     0x500: addq.w #1, ($ff0000).l
+///            rte
+fn vblankRom() [0x508]u8 {
+    const rom = spinRom();
+    var wide: [0x508]u8 = @splat(0);
+    @memcpy(wide[0..rom.len], &rom);
+
+    // Unlike the spin, this one takes exceptions, so its stack has to be in
+    // RAM rather than at the very bottom of it.
+    const handler = 0x500;
+    std.mem.writeInt(u32, wide[0..4], cps.ram_lo + 0x1000, .big);
+    std.mem.writeInt(u32, wide[m68k.Exception.autovector(vint_level).vectorAddr()..][0..4], handler, .big);
+    for ([_]u16{ 0x46fc, 0x2000, 0x60fe }, 0..) |word, i| {
+        std.mem.writeInt(u16, wide[0x400 + i * 2 ..][0..2], word, .big);
+    }
+    for ([_]u16{ 0x5279, 0x00ff, 0x0000, 0x4e73 }, 0..) |word, i| {
+        std.mem.writeInt(u16, wide[handler + i * 2 ..][0..2], word, .big);
+    }
+    return wide;
+}
+
+test "vblank comes once a frame, at level 2" {
+    var rom = vblankRom();
+    var c = spinning(&rom);
+    var cpu: m68k.Cpu = .{};
+    reset(&c, &cpu);
+
+    const frames = 5;
+    for (0..frames) |_| runFrame(&c, &cpu);
+    try testing.expectEqual(@as(u16, frames), std.mem.readInt(u16, c.ram[0..2], .big));
+
+    // And it is level 2 the handler was reached by: masking level 2 out stops
+    // the count, where a level 4 or 6 interrupt would still get through.
+    cpu.sr.ipl = vint_level;
+    for (0..frames) |_| runFrame(&c, &cpu);
+    try testing.expectEqual(@as(u16, frames), std.mem.readInt(u16, c.ram[0..2], .big));
 }
 
 test "one line is the same slice of time for every part of the board" {
