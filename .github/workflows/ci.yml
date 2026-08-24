@@ -23,7 +23,7 @@ jobs:
         with:
           version: "0.16.0"
       - name: Check formatting
-        run: zig fmt --check src/ build.zig
+        run: zig fmt --check src/ test/ build.zig
 
   lint-actions:
     name: Lint workflows

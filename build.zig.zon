@@ -3,7 +3,16 @@
     .version = "0.1.0",
     .fingerprint = 0x9fcc9bf35ae2192a,
     .minimum_zig_version = "0.16.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .z68k = .{
+            .url = "git+https://github.com/davidbz/z68k#b4fd94b653a3647334af3e24a9bde2b2d8b7fc0a",
+            .hash = "z68k-0.0.1-F4jI29FTBAAqjPtlkDoT0xdLEiQSpQP-Off1b5iDW0S3",
+        },
+        .z80 = .{
+            .url = "git+https://github.com/davidbz/z80#965e5c5e5f9570e3d15e13c66754bad0a78620c2",
+            .hash = "z80-0.0.1-32YB2YlBAQB_Y0ZaTZFk8SywDOJGnTt-ES0He64Wjb-Q",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

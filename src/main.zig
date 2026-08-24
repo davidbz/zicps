@@ -1,0 +1,225 @@
+//! The program. At M0 it is the headless runner and nothing else: render N
+//! frames with no window, hash the machine, exit. DESIGN.md §6.1 calls this
+//! the backbone of testing rather than a debug feature, which is why it is the
+//! first thing that exists and has to keep working forever.
+//!
+//! The window arrives at M5. This is also the only file allowed to reach raylib
+//! when it does, and the build graph is what enforces that rather than anyone
+//! remembering.
+
+const std = @import("std");
+const board = @import("board");
+const romset = @import("romset");
+const cps = @import("cps");
+const scheduler = @import("scheduler");
+const video = @import("video");
+const input = @import("input");
+const config = @import("config");
+
+/// A board file is text a person typed; a replay log is one word per frame.
+const max_board_bytes = 64 << 10;
+const max_replay_bytes = 16 << 20;
+
+/// One frame of the control panel, little-endian: both players' buttons and the
+/// panel's six inputs. Wider than zigesis's word because this machine has two
+/// six-button players and a coin door.
+const log_frame_bytes = 4;
+const log_pad2_shift = cps.button_count;
+const log_panel_shift = 2 * cps.button_count;
+
+fn pack(in: cps.Inputs) u32 {
+    return @as(u32, in.pad[0]) |
+        @as(u32, in.pad[1]) << log_pad2_shift |
+        @as(u32, in.panel) << log_panel_shift;
+}
+
+fn unpack(word: u32) cps.Inputs {
+    const pad_mask = (@as(u32, 1) << cps.button_count) - 1;
+    return .{
+        .pad = .{
+            @truncate(word & pad_mask),
+            @truncate((word >> log_pad2_shift) & pad_mask),
+        },
+        .panel = @truncate(word >> log_panel_shift),
+    };
+}
+
+/// A recorded input log. Past the end reads as nothing held, so a short log
+/// runs a long test without special-casing.
+const Replay = struct {
+    log: []const u8,
+
+    fn at(r: Replay, frame: u32) cps.Inputs {
+        const offset = @as(usize, frame) * log_frame_bytes;
+        if (offset + log_frame_bytes > r.log.len) return .{};
+        return unpack(std.mem.readInt(u32, r.log[offset..][0..log_frame_bytes], .little));
+    }
+};
+
+/// What a user error exits with. The message has already been printed and says
+/// more than a Zig stack trace would.
+fn fail() noreturn {
+    std.process.exit(1);
+}
+
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
+
+    var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
+    defer args.deinit();
+    _ = args.skip();
+
+    var set_path: ?[]const u8 = null;
+    var board_path: ?[]const u8 = null;
+    var replay_path: ?[]const u8 = null;
+    var frames: ?u32 = null;
+    var every_frame = false;
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--frames")) {
+            frames = try std.fmt.parseInt(u32, args.next() orelse "60", 10);
+        } else if (std.mem.eql(u8, arg, "--board")) {
+            board_path = args.next() orelse return error.MissingBoardPath;
+        } else if (std.mem.eql(u8, arg, "--replay")) {
+            replay_path = args.next() orelse return error.MissingReplayPath;
+        } else if (std.mem.eql(u8, arg, "--hash")) {
+            every_frame = true;
+        } else if (std.mem.eql(u8, arg, "--help")) {
+            usage();
+            return;
+        } else if (set_path == null) {
+            set_path = arg;
+        } else {
+            std.debug.print("ignoring extra argument {s}\n", .{arg});
+        }
+    }
+
+    const set = set_path orelse {
+        usage();
+        fail();
+    };
+
+    // The board file lives beside the set under the set's own name, whether the
+    // set is a directory or a zip.
+    var default_board: [std.fs.max_path_bytes]u8 = undefined;
+    const board_file = board_path orelse try beside(&default_board, set, ".board");
+
+    var diag = board.Diag{};
+    const cwd = std.Io.Dir.cwd();
+
+    const text = cwd.readFileAlloc(io, board_file, gpa, .limited(max_board_bytes)) catch |err| {
+        std.debug.print("no board file at {s} ({t}).\n" ++
+            "A CPS-1.5 board keeps its configuration in battery-backed RAM, so zicps needs\n" ++
+            "one describing this board before it can run the set. See DESIGN.md §8.1.\n", .{ board_file, err });
+        fail();
+    };
+    defer gpa.free(text);
+
+    const b = board.parse(text, &diag) catch {
+        std.debug.print("{s}: {s}\n", .{ board_file, diag.message() });
+        fail();
+    };
+
+    var rom = romset.load(gpa, io, cwd, set, &b, &diag) catch {
+        std.debug.print("{s}: {s}\n", .{ set, diag.message() });
+        fail();
+    };
+    defer rom.deinit(gpa);
+
+    // Two thirds of a megabyte of RAM, registers and framebuffer: too much for
+    // the stack, and allocated exactly once.
+    const c = try gpa.create(cps.Cps);
+    defer gpa.destroy(c);
+    c.* = .{ .board = b, .rom = rom };
+
+    var cpu: scheduler.Cpu = .{};
+    scheduler.reset(c, &cpu);
+
+    const n = frames orelse {
+        std.debug.print("the window arrives at M5; for now, run with --frames N\n", .{});
+        fail();
+    };
+    try headless(io, gpa, c, &cpu, n, replay_path, every_frame);
+}
+
+fn headless(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    c: *cps.Cps,
+    cpu: *scheduler.Cpu,
+    n: u32,
+    replay_path: ?[]const u8,
+    every_frame: bool,
+) !void {
+    const replay: ?Replay = if (replay_path) |p| .{
+        .log = std.Io.Dir.cwd().readFileAlloc(io, p, gpa, .limited(max_replay_bytes)) catch |err| {
+            std.debug.print("cannot read replay {s}: {t}\n", .{ p, err });
+            fail();
+        },
+    } else null;
+    defer if (replay) |r| gpa.free(r.log);
+
+    var frame: u32 = 0;
+    while (frame < n and !cpu.halted) : (frame += 1) {
+        if (replay) |r| c.inputs = r.at(frame);
+        scheduler.runFrame(c, cpu);
+        if (every_frame) report(c, cpu, frame + 1);
+    }
+    if (!every_frame) report(c, cpu, frame);
+
+    if (cpu.halted) {
+        std.debug.print("the 68000 halted at pc={x:0>6} sr={x:0>4} after {d} frames\n", .{ cpu.pc, @as(u16, @bitCast(cpu.sr)), frame });
+        fail();
+    }
+}
+
+fn report(c: *const cps.Cps, cpu: *const scheduler.Cpu, frame: u32) void {
+    std.debug.print("frame {d} hash={x:0>16}\n", .{ frame, scheduler.hash(c, cpu) });
+}
+
+/// `sets/dino.zip` and `sets/dino` both look beside themselves for
+/// `sets/dino.board`.
+fn beside(buf: []u8, path: []const u8, suffix: []const u8) ![]const u8 {
+    const dot = std.mem.lastIndexOfScalar(u8, std.fs.path.basename(path), '.');
+    const stem = if (dot) |d| path[0 .. path.len - (std.fs.path.basename(path).len - d)] else path;
+    return std.fmt.bufPrint(buf, "{s}{s}", .{ stem, suffix });
+}
+
+fn usage() void {
+    std.debug.print(
+        \\usage: zicps <rom-set> [options]
+        \\
+        \\  <rom-set>          a directory of chip images, or a zip of the same
+        \\  --board <path>     the board file (default: the set's path with .board)
+        \\  --frames N         run N frames with no window and print a state hash
+        \\  --replay <path>    drive the controls from a recorded input log
+        \\  --hash             print a hash every frame, not only the last
+        \\
+    , .{});
+}
+
+const testing = std.testing;
+
+test "an input log round-trips every bit the machine can be handed" {
+    const in = cps.Inputs{
+        .pad = .{ cps.Button.up.mask() | cps.Button.b6.mask(), cps.Button.left.mask() },
+        .panel = cps.Panel.coin1.mask() | cps.Panel.test_switch.mask(),
+    };
+    try testing.expectEqual(in, unpack(pack(in)));
+
+    // A log that runs out reads as nothing held, so a short log runs a long
+    // test without a special case.
+    var word: [log_frame_bytes]u8 = undefined;
+    std.mem.writeInt(u32, &word, pack(in), .little);
+    const r = Replay{ .log = &word };
+    try testing.expectEqual(in, r.at(0));
+    try testing.expectEqual(cps.Inputs{}, r.at(1));
+}
+
+test "the board file is looked for beside the set, under the set's own name" {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    try testing.expectEqualStrings("sets/dino.board", try beside(&buf, "sets/dino.zip", ".board"));
+    try testing.expectEqualStrings("sets/dino.board", try beside(&buf, "sets/dino", ".board"));
+    // A dot in a directory on the way there is not the set's extension.
+    try testing.expectEqualStrings("my.sets/dino.board", try beside(&buf, "my.sets/dino", ".board"));
+}
