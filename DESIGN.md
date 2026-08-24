@@ -139,8 +139,12 @@ something on the board.
 | QSound sample | 24.038 kHz (60 MHz ÷ 2 ÷ 1248) | 4992 |
 
 512 dots per line and 262 lines make 134,144 dots a frame, so the picture runs
-at 59.6295 Hz with 384 × 224 of it visible. One line is 7680 reference ticks:
+at 59.6374 Hz with 384 × 224 of it visible. One line is 7680 reference ticks:
 768 cycles of 68000, 512 of Z80, and one and a half QSound samples.
+
+(Earlier drafts of this section said 59.6295 Hz, and MAME's `cps1.cpp` carries a
+comment saying 59.63. Both are the same arithmetic rounded differently:
+8,000,000 ÷ 134,144 is 59.6374.)
 
 Step granularity is the scanline, as in zigesis: run the 68000 for a line's
 worth of cycles, run the Z80 for its share, tick QSound, render the line,
@@ -310,11 +314,13 @@ The 68000's map:
 
 | Range | What |
 |---|---|
-| `0x000000-0x3fffff` | program ROM, unencrypted on this board |
+| `0x000000-0x1fffff` | program ROM, unencrypted on this board |
 | `0x800000-0x800007` | player controls |
+| `0x800018-0x80001f` | system inputs (coins, start, service, test) and, on boards that have them, three banks of DIP switches |
 | `0x800030-0x800037` | coin counters and lockouts |
 | `0x800100-0x80013f` | CPS-A register file |
-| `0x800140-0x8001ff` | CPS-B register file, mapped by a PAL on the B-board — which is why its offsets differ per board (§8) |
+| `0x800140-0x80017f` | CPS-B register file, mapped by a PAL on the B-board — which is why its offsets differ per board (§8) |
+| `0xf00000-0xf0ffff` | the sound board's program ROM, readable a byte at a time by the 68000 |
 | `0x900000-0x92ffff` | graphics RAM: name tables, object list, row-scroll table, palette source |
 | `0xf18000-0xf19fff`, `0xf1e000-0xf1ffff` | shared RAM with the sound board |
 | `0xf1c000`, `0xf1c002` | third and fourth player controls |
@@ -478,6 +484,44 @@ replay from an input log); the module graph enforcing that nothing but
 Acceptance: a set and its board file load, the 68000 runs from its reset vector,
 a set that does not add up is rejected with a message naming the problem, and
 two runs of the same input log hash identically on two platforms.
+
+**Ceilings left behind.** Corrections to this document, made where they belong:
+the refresh rate in §3.3, and three entries in §7.1's map — the program ROM
+window is 2 MiB not 4, the CPS-B file ends at `0x80017f` not `0x8001ff`, and the
+table was missing the system inputs at `0x800018` and the sound ROM the 68000
+can read back at `0xf00000`.
+
+What M0 deliberately does not do, and where each is picked up:
+
+- **No interrupts at all.** The 68000 runs a line's cycles and nothing ever
+  raises IPL, so a real game spins in its wait loop. Vblank at level 2 is M1's,
+  the raster at level 4 is M2's.
+- **Nothing is drawn.** The framebuffer exists so that the hash and the save
+  state have their final shape now, and stays blank until M1. `--frames N`
+  therefore hashes the whole machine — RAM, graphics RAM, the register files,
+  the CPU — and not the picture alone, or it would hash the same on every run
+  of every set and prove nothing. Keep it hashing all of that once video lands.
+- **No sound board.** The Z80 is a dependency in the build graph and nothing
+  more; `0xf00000` reads back the audio ROM, the shared RAM windows are plain
+  memory, and no one is on the other side of them until M3. Kabuki decryption
+  is M3's, QSound is M4's, and `--hash` gains an audio hash with them.
+- **No EEPROM.** `0xf1c006` floats; §8.4's serial protocol arrives with save
+  states at M6.
+- **Coin counters and lockouts latch and do nothing.** They are written by
+  games and the write has to land somewhere.
+- **No `--record`.** A replay log is a file of one 32-bit word a frame, which
+  the tests write directly; recording one from a window needs the window, so it
+  arrives with M5.
+- **Graphics decode is per-row and unaddressed.** The 4bpp interleave is undone
+  at load into a byte per pixel, but nothing yet turns a tile code into an
+  offset in that buffer — bank ranges and layout selection are M1's.
+- **The 68000 carries no timing debt.** 7680 reference ticks a line divide by
+  10 exactly. §3.3's debt machinery is real and arrives with QSound's 4992 at
+  M4; only the overrun of an instruction across the line boundary is carried now.
+- **One real board's numbers appear in `board.zig`, as a test fixture.** §8.1
+  says no board is named in the repo; this one is a string literal inside a
+  parser test, because a parser test needs something real to parse. It stays a
+  test fixture, is not shipped, and must not grow siblings.
 
 ### M1: Video I — tilemaps
 
