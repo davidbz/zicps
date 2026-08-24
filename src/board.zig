@@ -26,6 +26,11 @@ pub const cps_b_bytes = 0xc0;
 pub const Layer = enum(u3) { sprites, scroll1, scroll2, scroll3, stars };
 pub const layer_count = @typeInfo(Layer).@"enum".fields.len;
 
+/// What the layer-enable masks are in, which is not `Layer`: the object list
+/// has no enable bit of its own and each starfield has one.
+pub const Enable = enum(u3) { scroll1, scroll2, scroll3, stars1, stars2 };
+pub const enable_count = @typeInfo(Enable).@"enum".fields.len;
+
 /// Which chips a tile code range lives on, and the same four bank sizes the
 /// B-board's PAL switches between.
 pub const gfx_banks = 4;
@@ -113,10 +118,14 @@ pub const Board = struct {
     in2_offset: Reg = null,
     in3_offset: Reg = null,
     out2_offset: Reg = null,
-    /// Which bit of the layer control register enables each layer. Ideally one
-    /// bit each; on many boards it is not known which bit is which, which is
-    /// why these are masks and not indices.
-    layer_enable: [layer_count]u16 = @splat(0),
+    /// Which bit of the layer control register enables each layer, in `Enable`
+    /// order. Ideally one bit each; on many boards it is not known which bit is
+    /// which, which is why these are masks and not indices.
+    layer_enable: [enable_count]u16 = @splat(0),
+    /// The two raster counters, for a board whose PAL decodes them and whose
+    /// B-board carries level 4 through to the 68000. Most do not, and a board
+    /// file that says nothing gets no raster interrupt.
+    raster_line: [2]Reg = @splat(null),
 
     bank_sizes: [gfx_banks]u32 = @splat(0),
     ranges: [max_gfx_ranges]GfxRange = undefined,
@@ -208,6 +217,8 @@ pub fn parse(text: []const u8, diag: *Diag) Error!Board {
             b.out2_offset = try reg(&vals, key, line_no, diag);
         } else if (std.mem.eql(u8, key, "layer_enable")) {
             for (&b.layer_enable) |*m| m.* = try int(u16, &vals, key, line_no, diag);
+        } else if (std.mem.eql(u8, key, "raster_line")) {
+            for (&b.raster_line) |*r| r.* = try reg(&vals, key, line_no, diag);
         } else if (std.mem.eql(u8, key, "bank_sizes")) {
             for (&b.bank_sizes) |*s| s.* = try int(u32, &vals, key, line_no, diag);
         } else if (std.mem.eql(u8, key, "gfx_bank")) {
@@ -252,6 +263,12 @@ fn require(b: *const Board, diag: *Diag) Error!void {
     }
     if (b.palette_control == null) {
         missing[n] = "palette_control";
+        n += 1;
+    }
+    // Not one mask each — a board with no starfields really does have two zeroes
+    // — but all five zero means nothing would ever be drawn, silently.
+    if (std.mem.allEqual(u16, &b.layer_enable, 0)) {
+        missing[n] = "layer_enable";
         n += 1;
     }
     if (b.range_count == 0) {
@@ -422,7 +439,12 @@ test "a whole board file parses into the battery's contents" {
     // `none` is a decoded answer, not a missing one.
     try testing.expectEqual(@as(Reg, null), b.mult_factor1);
     try testing.expectEqual(@as(Reg, 0x2c), b.in2_offset);
-    try testing.expectEqual(@as(u16, 0x20), b.layer_enable[@intFromEnum(Layer.scroll2)]);
+    // The masks are in `Enable` order, so the third is scroll3's and not — as
+    // `Layer` would have it — scroll2's.
+    try testing.expectEqual(@as(u16, 0x20), b.layer_enable[@intFromEnum(Enable.scroll3)]);
+    try testing.expectEqual(@as(u16, 0x02), b.layer_enable[@intFromEnum(Enable.scroll2)]);
+    // Nothing said `raster_line`, so this board has no raster interrupt.
+    try testing.expectEqual([2]Reg{ null, null }, b.raster_line);
 
     try testing.expectEqual(@as(u8, 2), b.range_count);
     const all_four = (1 << @intFromEnum(Layer.sprites)) | (1 << @intFromEnum(Layer.scroll1)) |
@@ -483,7 +505,7 @@ test "a board file missing what the machine needs names all of it at once" {
 }
 
 test "a sound ROM with no key to decrypt it is refused by name" {
-    const no_key = "version = 1\nlayer_control = 0\npriority = 0 2 4 6\npalette_control = 8\n" ++
+    const no_key = "version = 1\nlayer_control = 0\npriority = 0 2 4 6\npalette_control = 8\nlayer_enable = 2 4 8 0 0\n" ++
         "gfx_bank = sprites 0 0xffff 0\nprogram = 0 0x100 word p.bin\naudio = 0 0x8000 byte q.5k\n";
     try expectRefused(no_key, "q.5k");
 }
@@ -497,6 +519,7 @@ test "comments, blank lines and stray whitespace are not content" {
         \\  layer_control = 0x12
         \\priority = 0x14 0x16 0x08 0x0a
         \\palette_control = 0x0c
+        \\layer_enable = 0x02 0x04 0x08 0 0
         \\gfx_bank = sprites 0 0xffff 0
         \\program = 0 0x100 word p.bin
     , &diag);

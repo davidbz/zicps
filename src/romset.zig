@@ -321,6 +321,7 @@ const tiny_board =
     \\layer_control = 0x12
     \\priority = 0x14 0x16 0x08 0x0a
     \\palette_control = 0x0c
+    \\layer_enable = 0x02 0x04 0x08 0 0
     \\gfx_bank = sprites|scroll1 0 0xffff 0
     \\program = 0x000000 0x10 word   even.bin
     \\program = 0x000010 0x10 word   odd.bin

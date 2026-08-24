@@ -400,11 +400,28 @@ this document at that point:
   the DSP's clock-to-sample divider (§3.3's 120 MHz reference is only correct if
   those four rates are).
 - The sound board's Z80 port and register map.
-- The raster interrupt's enable bit and line registers: the historic driver
-  reads an enable at offset `0x4e` bit 9 and two line positions at `0x50` and
-  `0x52` of the register block, which needs confirming against the current one.
-- The CPS-B priority masks' exact semantics, and the object list's layout and
-  double-buffering.
+- The raster interrupt's registers, **confirmed at M2**: there is no enable bit
+  and there are no line registers. Two nine-bit down-counters are reloaded from
+  CPS-B `0x10` and `0x12` at line 0, count down one a line, and pull IPL2 — a
+  level 4 interrupt, or a level 6 one when it lands on the same line as vblank —
+  as either reaches zero. The power-up reload of `0x1ff` never gets there inside
+  a 262-line frame, which is how a board that does not use the interrupt is
+  written down. A write with bit 15 set reloads that counter there and then; a
+  read returns the live counter rather than the reload. The `0x4e` bit 9 enable
+  and the `0x50`/`0x52` line positions quoted here before were an older driver's
+  and are not in the current one. IPL2 is wired at all only on later B boards
+  with JP1 closed, so the two offsets are a board-file line (`raster_line`) that
+  defaults to `none`.
+- The CPS-B priority masks and the object list, **confirmed at M2**: the four
+  priority registers are pen masks, one per group, and a tile picks its group
+  with bits 7 and 8 of its attribute word. A pen whose bit is set in that mask
+  is drawn *over* the sprites — but only by the tilemap in the pass immediately
+  under the object list, and only where that tilemap drew at all. A group whose
+  register the board's PAL does not decode masks nothing. The object list is 256
+  entries of four words — x, y, code, attribute — ending at the first attribute
+  with `0xff` in its top byte, drawn last entry first so the first entry a game
+  writes ends up on top, and double-buffered: the chip takes its copy at vblank,
+  so a list written during a frame is the one drawn in the next.
 
 ## 8. The Board File, ROM Sets, Persistence
 
@@ -577,6 +594,51 @@ changes scroll mid-frame from the raster interrupt; a scoreboard step
 (`zig build testrom`) that walks the ROM's pages and fails when a pinned score
 moves in either direction, which is this project's equivalent of a conformance
 ROM and the reason the test ROM is worth writing.
+
+**Ceilings left behind.** Corrections to this document, made where they belong:
+§7.4's raster entry was quoting an older driver — there is no enable bit and
+there are no line registers, and the confirmed counters are written there now,
+along with the confirmed priority and object-list semantics. The board file
+gains two lines with them: `raster_line`, which defaults to `none` because IPL2
+is not wired on every B board, and `layer_enable`, whose five masks are in the
+chip's own order — scroll1, scroll2, scroll3, stars1, stars2 — and not the order
+of the layer field in the layer control word.
+
+What M2 deliberately does not do, and where each is picked up:
+
+- **The raster interrupt is raised at the line boundary.** CPS-B has a third
+  counter, at `0x0e`, that delays the interrupt by a count of dot pairs into the
+  line; it is read and ignored, so a handler that writes a scroll register gets
+  its change from the top of the next line rather than from partway across one.
+  The counter is there to be added when a game is seen to tear at the wrong dot.
+- **Level 4 is dropped after one line if the CPU never took it**, exactly as
+  M1's vblank is and for the same missing z68k acknowledge hook. A frame in
+  which both fire on the same line asserts level 6, which is right, but two
+  raster counters set to the same line are one interrupt and not two.
+- **Flip screen turns the finished line round.** The 384x224 window is centred
+  in the 512x256 space the counters scan, so a 180-degree rotation of the
+  picture is the same picture the board would put out — for a still frame. A
+  game that writes a scroll register from a raster handler under flip gets the
+  change on the mirrored line, because the line the CPU is interrupted for is
+  no longer the line being drawn.
+- **The starfield enable bits are crossed, as MAME has them:** the mask its
+  tables call stars1 turns on the field that scrolls with the STARS2 registers.
+  Board files are written against those tables, so tidying it here would only
+  move the crossover into every board file.
+- **The starfields are drawn under everything.** They are painted before the
+  layer passes rather than taking a slot of their own, which is what the driver
+  does; whether the layer control can put a tilemap under them is not known.
+- **Sprites are 16x16 and nothing else.** The object list's block fields are
+  honoured, but there is no CPS2-style object DMA and no sprite masking beyond
+  the priority bitmap.
+- **The picture is still built a whole line at a time.** Everything a game
+  writes during a line lands on that line, which is enough for scroll and
+  palette changes from a raster handler and wrong for a game that changes a
+  register partway across a visible line.
+- **The scoreboard scores pixels by palette page.** The acceptance ROM gives
+  every page a red nibble of its own, so a page count says which layer put what
+  on screen — but two layers that swap identical pictures score the same. The
+  frame hash beside each score is what catches that.
 
 ### M3: The sound board
 
