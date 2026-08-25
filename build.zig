@@ -109,6 +109,26 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "input", .module = input }},
     });
 
+    // The board files that ship with this build (DESIGN.md §8.1). The list is
+    // generated beside them and holds nothing but `@embedFile`s, so a board
+    // file that changes rebuilds what carries it; everything that is not a
+    // table lives in `src/boards.zig`.
+    const board_list = b.createModule(.{
+        .root_source_file = b.path("boards/list.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const boards = b.addModule("boards", .{
+        .root_source_file = b.path("src/boards.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "list", .module = board_list },
+        },
+    });
+
     const snow = b.addModule("snow", .{
         .root_source_file = b.path("src/ui/snow.zig"),
         .target = target,
@@ -197,14 +217,38 @@ pub fn build(b: *std.Build) void {
     }
 
     const modules = [_]*std.Build.Module{
-        board, romset, video,  cps,        scheduler, input,        config,
-        audio, kabuki, qsound, soundboard, snow,      system_tests,
+        board, romset, video,  cps,        scheduler, input, config,
+        audio, kabuki, qsound, soundboard, snow,      boards, system_tests,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });
         test_step.dependOn(&b.addRunArtifact(tests).step);
         check_step.dependOn(&tests.step);
     }
+
+    // --- the board library ---------------------------------------------------
+    // The boards under `boards/` are transcribed from MAME's CPS-1 tables by a
+    // tool run by hand, and its output is committed: `zig build boards -- <mame
+    // source dir>`. Nothing below runs during an ordinary build, and the tool
+    // is built for whatever the rest is, because regenerating a table on a
+    // machine that cannot run the result is not a thing anyone does.
+    const boards_tool = b.addExecutable(.{
+        .name = "mame_to_board",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/mame_to_board.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "board", .module = board },
+                .{ .name = "romset", .module = romset },
+            },
+        }),
+    });
+    const generate = b.addRunArtifact(boards_tool);
+    generate.setCwd(b.path("."));
+    if (b.args) |args| generate.addArgs(args);
+    b.step("boards", "Rewrite boards/ from MAME's CPS-1 tables").dependOn(&generate.step);
+    check_step.dependOn(&boards_tool.step);
 
     // --- the program ---------------------------------------------------------
     // The window, and the only two modules allowed to reach raylib (§3.2).
@@ -241,6 +285,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "input", .module = input },
             .{ .name = "config", .module = config },
             .{ .name = "snow", .module = snow },
+            .{ .name = "boards", .module = boards },
             .{ .name = "shell", .module = shell },
         },
     });

@@ -1,0 +1,48 @@
+# Board file for MAME's `sf2uf`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 sf2u_30f.11e crc=0xfe39ee33
+program = 0x000001 0x020000 byte16 sf2u_37f.11f crc=0x169e7388
+program = 0x040000 0x020000 byte16 sf2u_31f.12e crc=0x69a0a301
+program = 0x040001 0x020000 byte16 sf2u_38f.12f crc=0x1510e4e2
+program = 0x080000 0x020000 byte16 sf2u_28f.9e crc=0xacd8175b
+program = 0x080001 0x020000 byte16 sf2u_35f.9f crc=0xc0a80bd1
+program = 0x0c0000 0x020000 byte16 sf2_29b.10e crc=0xbb4af315
+program = 0x0c0001 0x020000 byte16 sf2_36b.10f crc=0xc02a13eb
+
+gfx = 0x000000 0x080000 word64 sf2-5m.4a crc=0x22c9cc8e
+gfx = 0x000002 0x080000 word64 sf2-7m.6a crc=0x57213be8
+gfx = 0x000004 0x080000 word64 sf2-1m.3a crc=0xba529b4f
+gfx = 0x000006 0x080000 word64 sf2-3m.5a crc=0x4b1b33a8
+gfx = 0x200000 0x080000 word64 sf2-6m.4c crc=0x2c7e2229
+gfx = 0x200002 0x080000 word64 sf2-8m.6c crc=0xb5548f17
+gfx = 0x200004 0x080000 word64 sf2-2m.3c crc=0x14b84312
+gfx = 0x200006 0x080000 word64 sf2-4m.5c crc=0x5e9cd89a
+gfx = 0x400000 0x080000 word64 sf2-13m.4d crc=0x994bfa58
+gfx = 0x400002 0x080000 word64 sf2-15m.6d crc=0x3e66ad9d
+gfx = 0x400004 0x080000 word64 sf2-9m.3d crc=0xc1befaa8
+gfx = 0x400006 0x080000 word64 sf2-11m.5d crc=0x0627c831
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x02
+priority        = 0x04 0x06 0x08 0x0a
+palette_control = 0x0c
+layer_enable    = 0x04 0x02 0x20 0x00 0x00
+id              = 0x0e 0x0405
+in2             = 0x36
+
+bank_sizes = 0x8000 0x8000 0x8000 0x0
+gfx_bank = sprites 0x00000 0x07fff 0
+gfx_bank = sprites 0x08000 0x0ffff 1
+gfx_bank = sprites 0x10000 0x11fff 2
+gfx_bank = scroll3 0x02000 0x03fff 2
+gfx_bank = scroll1 0x04000 0x04fff 2
+gfx_bank = scroll2 0x05000 0x07fff 2

@@ -1,0 +1,29 @@
+# Board file for MAME's `pang3j`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   pa3j_17.11l crc=0x21f6e51f
+program = 0x080000 0x080000 word   pa3j_16.10l crc=0xca1d7897
+
+gfx = 0x000000 0x100000 word64 pa3-01m.2c crc=0x068a152c
+gfx = 0x000004 0x100000 word64 pa3-01m.2c 0x100000 crc=0x068a152c
+gfx = 0x000002 0x100000 word64 pa3-07m.2f crc=0x3a4a619d
+gfx = 0x000006 0x100000 word64 pa3-07m.2f 0x100000 crc=0x3a4a619d
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x10000 0x0 0x0 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x0ffff 0

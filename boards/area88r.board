@@ -1,0 +1,30 @@
+# Board file for MAME's `area88r`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   araj_23.8f crc=0x7045d6cb
+program = 0x080000 0x080000 word   araj_22.7f crc=0x9913002e
+
+gfx = 0x000000 0x080000 word64 ara_01.3a crc=0xbf4575d8
+gfx = 0x000002 0x080000 word64 ara_02.4a crc=0xa02945f4
+gfx = 0x000004 0x080000 word64 ara_03.5a crc=0x5965ca8d
+gfx = 0x000006 0x080000 word64 ara_04.6a crc=0xac6db17d
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x08000 0x0ffff 1

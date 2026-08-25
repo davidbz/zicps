@@ -1,0 +1,36 @@
+# Board file for MAME's `pang3b5`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   pa3e_17.11l crc=0xd7041d32
+program = 0x080000 0x080000 word   pa3e_16.10l crc=0x1be9a483
+
+gfx = 0x000000 0x080000 word64 1.2c crc=0x22c934c4
+gfx = 0x000002 0x080000 word64 7.2f crc=0x51031180
+gfx = 0x000004 0x080000 word64 3.4c crc=0xac119a46
+gfx = 0x000006 0x080000 word64 9.4f crc=0x2e1d35f2
+gfx = 0x200000 0x080000 word64 2.3c crc=0x07c85e9b
+gfx = 0x200002 0x080000 word64 8.3f crc=0x325cc0b7
+gfx = 0x200004 0x080000 word64 4.5c crc=0x4ad13297
+gfx = 0x200006 0x080000 word64 10.5f crc=0x026d0cd2
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x10000 0x10000 0x0 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x10000 0x17fff 0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x08000 0x0ffff 1
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x18000 0x1ffff 1

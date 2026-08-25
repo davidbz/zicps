@@ -1,0 +1,44 @@
+# Board file for MAME's `wofa`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   tk2a_23c.8f crc=0x2e024628
+program = 0x080000 0x080000 word   tk2a_22c.7f crc=0x900ad4cd
+
+gfx = 0x000000 0x080000 word64 tk2-1m.3a crc=0x0d9cb9bf
+gfx = 0x000002 0x080000 word64 tk2-3m.5a crc=0x45227027
+gfx = 0x000004 0x080000 word64 tk2-2m.4a crc=0xc5ca2460
+gfx = 0x000006 0x080000 word64 tk2-4m.6a crc=0xe349551c
+gfx = 0x200000 0x080000 word64 tk2-5m.7a crc=0x291f0f0b
+gfx = 0x200002 0x080000 word64 tk2-7m.9a crc=0x3edeb949
+gfx = 0x200004 0x080000 word64 tk2-6m.8a crc=0x1abd14d6
+gfx = 0x200006 0x080000 word64 tk2-8m.10a crc=0xb27948e3
+
+audio = 0x000000 0x008000 byte   tk2_qa.5k crc=0xc9183a0d
+audio = 0x010000 0x018000 byte   tk2_qa.5k 0x8000 crc=0xc9183a0d
+
+qsound = 0x000000 0x080000 byte   tk2-q1.1k crc=0x611268cf
+qsound = 0x080000 0x080000 byte   tk2-q2.2k crc=0x20f55ca9
+qsound = 0x100000 0x080000 byte   tk2-q3.3k crc=0xbfcf6f52
+qsound = 0x180000 0x080000 byte   tk2-q4.4k crc=0x36642e88
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x08000 0x0ffff 1
+
+kabuki = 0x01234567 0x54163072 0x5151 0x51

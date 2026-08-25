@@ -1,0 +1,50 @@
+# Board file for MAME's `sf2rb2`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 27.bin crc=0x40296ecd
+program = 0x000001 0x020000 byte16 31.bin crc=0x87954a41
+program = 0x040000 0x020000 byte16 26.bin crc=0xa6974195
+program = 0x040001 0x020000 byte16 30.bin crc=0x8141fe32
+program = 0x080000 0x020000 byte16 25.bin crc=0x9ef8f772
+program = 0x080001 0x020000 byte16 29.bin crc=0x7d9c479c
+program = 0x0c0000 0x020000 byte16 24.bin crc=0x93579684
+program = 0x0c0001 0x020000 byte16 28.bin crc=0xff728865
+program = 0x100000 0x080000 word   s92_21a.bin crc=0x925a7877
+
+gfx = 0x000000 0x080000 word64 s92_01.bin crc=0x03b0d852
+gfx = 0x000002 0x080000 word64 s92_02.bin crc=0x840289ec
+gfx = 0x000004 0x080000 word64 s92_03.bin crc=0xcdb5f027
+gfx = 0x000006 0x080000 word64 s92_04.bin crc=0xe2799472
+gfx = 0x200000 0x080000 word64 s92_05.bin crc=0xba8a2761
+gfx = 0x200002 0x080000 word64 s92_06.bin crc=0xe584bfb5
+gfx = 0x200004 0x080000 word64 s92_07.bin crc=0x21e3f87d
+gfx = 0x200006 0x080000 word64 s92_08.bin crc=0xbefc47df
+gfx = 0x400000 0x080000 word64 s92_10.bin crc=0x960687d5
+gfx = 0x400002 0x080000 word64 s92_11.bin crc=0x978ecd18
+gfx = 0x400004 0x080000 word64 s92_12.bin crc=0xd6ec9a0a
+gfx = 0x400006 0x080000 word64 s92_13.bin crc=0xed2c67f6
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+in2             = 0x36
+
+bank_sizes = 0x8000 0x8000 0x8000 0x0
+gfx_bank = sprites 0x00000 0x07fff 0
+gfx_bank = sprites 0x08000 0x0ffff 1
+gfx_bank = sprites 0x10000 0x11fff 2
+gfx_bank = scroll3 0x02000 0x03fff 2
+gfx_bank = scroll1 0x04000 0x04fff 2
+gfx_bank = scroll2 0x05000 0x07fff 2

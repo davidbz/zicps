@@ -1,0 +1,65 @@
+# Board file for MAME's `daimakai`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 dmj_38.12f crc=0x82fd1798
+program = 0x000001 0x020000 byte16 dmj_39.12h crc=0x35366ccc
+program = 0x040000 0x020000 byte16 dmj_40.13f crc=0xa17c170a
+program = 0x040001 0x020000 byte16 dmj_41.13h crc=0x6af0b391
+program = 0x080000 0x020000 byte16 dm_33.10f crc=0x384d60c4
+program = 0x080001 0x020000 byte16 dm_34.10h crc=0x19abe30f
+program = 0x0c0000 0x020000 byte16 dm_35.11f crc=0xc04b85c8
+program = 0x0c0001 0x020000 byte16 dm_36.11h crc=0x89be83de
+
+gfx = 0x000000 0x020000 byte64 dm_02.4b crc=0x8b98dc48
+gfx = 0x000001 0x020000 byte64 dm_01.4a crc=0x80896c33
+gfx = 0x000002 0x020000 byte64 dm_10.9b crc=0xc2e7d9ef
+gfx = 0x000003 0x020000 byte64 dm_09.9a crc=0xc9c4afa5
+gfx = 0x000004 0x020000 byte64 dm_18.5e crc=0x1aa0db99
+gfx = 0x000005 0x020000 byte64 dm_17.5c crc=0xdc6ed8ad
+gfx = 0x000006 0x020000 byte64 dm_30.8h crc=0xd9d3f8bd
+gfx = 0x000007 0x020000 byte64 dm_29.8f crc=0x49a48796
+gfx = 0x100000 0x020000 byte64 dm_04.5b crc=0xa4f4f8f0
+gfx = 0x100001 0x020000 byte64 dm_03.5a crc=0xb1033e62
+gfx = 0x100002 0x020000 byte64 dm_12.10b crc=0x10fdd76a
+gfx = 0x100003 0x020000 byte64 dm_11.10a crc=0x9040cb04
+gfx = 0x100004 0x020000 byte64 dm_20.7e crc=0x281d0b3e
+gfx = 0x100005 0x020000 byte64 dm_19.7c crc=0x2623b52f
+gfx = 0x100006 0x020000 byte64 dm_32.9h crc=0x99692344
+gfx = 0x100007 0x020000 byte64 dm_31.9f crc=0x54acb729
+gfx = 0x200000 0x010000 byte64 dm_06.7b crc=0xae24bb19
+gfx = 0x200001 0x010000 byte64 dm_05.7a crc=0xd34e271a
+gfx = 0x200002 0x010000 byte64 dm_14.11b crc=0x3f70dd37
+gfx = 0x200003 0x010000 byte64 dm_13.11a crc=0x7e69e2e6
+gfx = 0x200004 0x010000 byte64 dm_22.8e crc=0x37c9b6c6
+gfx = 0x200005 0x010000 byte64 dm_21.8c crc=0x2f1345b4
+gfx = 0x200006 0x010000 byte64 dm_26.10e crc=0x3c2a212a
+gfx = 0x200007 0x010000 byte64 dm_25.10c crc=0x889aac05
+gfx = 0x280000 0x010000 byte64 dm_08.8b crc=0xbcc0f28c
+gfx = 0x280001 0x010000 byte64 dm_07.8a crc=0x2a40166a
+gfx = 0x280002 0x010000 byte64 dm_16.12b crc=0x20f85c03
+gfx = 0x280003 0x010000 byte64 dm_15.12a crc=0x8426144b
+gfx = 0x280004 0x010000 byte64 dm_24.9e crc=0xda088d61
+gfx = 0x280005 0x010000 byte64 dm_23.9c crc=0x17e11df0
+gfx = 0x280006 0x010000 byte64 dm_28.11e crc=0xf187ba1c
+gfx = 0x280007 0x010000 byte64 dm_27.11c crc=0x29f79c78
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+
+bank_sizes = 0x4000 0x4000 0x2000 0x2000
+gfx_bank = sprites 0x00000 0x01fff 0
+gfx_bank = scroll1 0x02000 0x03fff 0
+gfx_bank = scroll2 0x04000 0x07fff 1
+gfx_bank = scroll3 0x00000 0x1ffff 2
+gfx_bank = sprites 0x02000 0x03fff 3

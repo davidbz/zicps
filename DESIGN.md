@@ -83,6 +83,7 @@ zicps/
     input.zig            # controls, key bindings
     romset.zig           # ROM set loading, interleave, graphics decode
     board.zig            # the board file: what the battery held (§8)
+    boards.zig           # the shipped board files, embedded and looked up
     state.zig            # save-state serialization
     config.zig           # options persistence
     ui/
@@ -92,8 +93,11 @@ zicps/
     system_test.zig      # headless frame-hash regression suite
     compat.zig           # boot every set in a directory, report what happened
     qsound_ref_test.zig  # differential harness against the QSound reference
+  boards/                # one board file per MAME set, embedded at build time
   tools/
     fetch_qsound_reference.sh
+    fetch_mame_source.sh
+    mame_to_board.zig    # writes boards/ from MAME's tables; run by hand
     testrom/             # our own CPS-1 test ROM: source, board file, binary
 ```
 
@@ -239,13 +243,17 @@ One window, simple design, no toolbar clutter. Three states, as in zigesis:
 The root page's right half is the **board card**, the counterpart of zigesis's
 cartridge card: what the set contains (how many program, graphics and sample
 ROMs, and how large), what the board file says the board was configured as, and
-and a checksum over the program ROM (M5 correction: said "whether the program
+a checksum over the program ROM (M5 correction: said "whether the program
 ROM's own checksum matches what is in the header", and there is no such header —
 a CPS-1 program image starts at its 68000 reset vectors and carries no checksum
 field, so the card shows a sum it computes itself, as a reading with nothing to
-compare it against rather than a verdict). Nothing here is looked up anywhere —
-every reading comes out of the files the user supplied, which is also why this
-emulator ships no database and names nothing.
+compare it against rather than a verdict). Nothing here is looked up anywhere:
+every reading comes out of the bytes the user supplied.
+
+The card's second line names the board file itself — `dino.board` when it came
+from the user's own file, `dino (built in)` when it came from the shipped
+library (§8.1) — because a board file the user did not write is still a claim
+about their machine, and which battery is in it should not be a mystery.
 
 Under all three states sits the status bar, sized into the window rather than
 overlaid, carrying the control panel, the set's name, and on the right the
@@ -451,23 +459,59 @@ ranges, the Kabuki key, and how the set's files interleave. It is
 human-editable and hand-writable, because on real hardware it is
 hand-programmable.
 
-This is also what keeps the repository clean. This project ships no per-board
-database and names no board: it reads what it is given, and if the board file is
-missing or incoherent it says exactly what it needed and stops, rather than
-drawing garbage and leaving the user to guess. A wrong CPS-B offset looks like a
-video bug, so failing loudly here is worth more than any fallback guess.
+The file the user supplies always wins, and a board file that is missing or
+incoherent stops the load with exactly what it needed rather than drawing
+garbage and leaving the user to guess. A wrong CPS-B offset looks like a video
+bug, so failing loudly is worth more than any fallback guess.
 
-The one board file that *is* committed describes the test ROM this project
-builds for itself (§10) — our board, our ROM, our bytes.
+But asking every user to transcribe thirty lines out of a C++ file before their
+set will run is a wall, and it is a wall nobody else puts up. So a library of
+board files ships under `boards/`, one per MAME set, and is embedded in the
+binary. Three things make that honest:
+
+- **It is a transcription, not a discovery.** Nobody can read these numbers off
+  a chip. Every emulator of this hardware is working from the same published
+  research — MAME's `cps1_config_table` in `src/mame/capcom/cps1_v.cpp` — and
+  ours says on every line of every file that this is where it came from.
+  `tools/mame_to_board.zig` writes them; the output is committed and the tool
+  is run by hand.
+- **It is selected by name, which is what everyone else does.** MAME keys that
+  table off the romset's short name — the zip's basename — and so does FBNeo;
+  jtcps1 picks by `.mra` file name. Nobody identifies a board by hashing the
+  set, and the CRC32s in MAME's tables exist to verify a dump, never to name
+  one. zicps does the same: `roms/dino.zip` looks for the board called `dino`.
+- **It is checked.** Every generated line carries the CRC32 of the dump it was
+  written against, so a set under the right name that is not that dump is
+  refused by name (§8.2) instead of being drawn wrong.
+
+The order is: `--board <path>`, then `<set>.board` beside the set, then the
+board that shipped under the set's name, then a refusal that says both what it
+looked for and that nothing ships under that name. The card in the window says
+which of the three it got (§5.2), so whose battery is in the machine is never a
+mystery.
+
+The one board file that is committed *outside* that library describes the test
+ROM this project builds for itself (§10) — our board, our ROM, our bytes.
 
 ### 8.2 ROM sets
 
 A set is a directory of chip images or a zip of the same; zips are read with
 `std.zip`, which is in the standard library and needs no dependency. The board
 file describes what each file is and how it interleaves — 68000 program ROMs in
-even/odd pairs, graphics ROMs interleaved across four or eight chips, the sound
-Z80's ROM, and the sample ROMs. Loading verifies sizes and reports a set that
-does not add up rather than running off the end of a buffer.
+even/odd pairs or one byte of every two, graphics ROMs interleaved across four
+or eight chips, the sound Z80's ROM, and the sample ROMs. Loading verifies sizes
+and reports a set that does not add up rather than running off the end of a
+buffer.
+
+A ROM line may also carry `crc=` — the CRC32 of the whole file, as MAME records
+it. Every generated board file does, and it buys two things. A file that is
+there under the right name and is the wrong dump is refused, naming both CRCs.
+And a chip that is *not* under the name the board file uses is looked for by
+what it hashes to instead: a zip made before MAME last renamed these dumps holds
+the right chips under old names, and the CRC in a zip's own directory is enough
+to find them without unpacking anything. MAME does the same with the same
+numbers. A directory set is matched by name only, because there the CRC would
+have to be earned by reading every file.
 
 Graphics are decoded once, at load, into a linear byte-per-pixel buffer. That is
 the biggest allocation the program makes and it happens exactly once per set.
@@ -852,6 +896,65 @@ What M5 deliberately does not do, and where each is picked up:
   that board's own service menu and found its settings still there after a
   restart — §10's test ROM has no menu to enter. The rest is M7's sweep.
 
+### M5.5: The board library
+
+Numbered between M5 and M6 because it is what M5 revealed rather than what M5
+planned: a shell that loads a set in three ways is no use when the set will not
+load without a file the user has to transcribe out of a C++ table first. M6 and
+after keep their numbers.
+
+Deliverables: `boards/`, one board file per CPS-1/1.5 set MAME lists, embedded
+in the binary and picked by the set's name (§8.1); `tools/mame_to_board.zig`,
+which writes them, and `tools/fetch_mame_source.sh`, which fetches the three
+MAME files it reads, commit-pinned and checksummed; a `crc=` on every ROM line
+and the `byte16` load mode the non-QSound sets need (§8.2); the board card's
+provenance line (§5.2).
+
+Acceptance: `zig build boards -- testdata/mame` rewrites `boards/` with no diff;
+every embedded board parses in the test suite, so one typo in 194 files fails
+the build; each of the seven sets present here boots headless for 600 frames off
+the shipped board alone; and the shipped `dino` board produces the frame and
+audio hashes the hand-written one does, which is what says the generator
+transcribes rather than invents.
+
+**Ceilings left behind.**
+
+- **194 of 233, and 187 of the 194 are untested.** The generator skips a set it
+  cannot express exactly rather than guessing: 33 bootlegs whose `cps1_config_table`
+  row carries a kludge value MAME's driver acts on and this emulator has no
+  model for, plus `sf2reda` (a `ROM_CONTINUE` whose chip MAME loads elsewhere),
+  `sf2dkot2` (`ROM_RELOAD`), `gulunpa` (`ROM_FILL` in the graphics region),
+  `cworld2ja`/`cworld2jb` (file names with spaces in them, which a board file's
+  line cannot hold), and `cps1mult` (64 MB of program ROM against a 4 MB
+  ceiling). Of what did get written, only `captcomm`, `cawing`, `dino`,
+  `ffight`, `mercs`, `punisher` and `sf2` have been booted; every other file
+  says `Untested` in its own header. A wrong mapper in MAME's table is a wrong
+  mapper here, and MAME's comments say plainly that some of these PALs are
+  substitutes for dumps nobody has.
+- **The library is video-only outside QSound.** A plain CPS-1 board's board file
+  carries no `audio` or `qsound` lines, because §5.1 puts the YM2151 and the OKI
+  out of scope. Those 175 sets boot, draw and are silent, through the same path
+  M3 already had for a set with no sound board. There is also no DIP switch
+  model, so they run on their default settings and their service menus are
+  unreachable — the EEPROM sets from M5 are the only ones that remember anything.
+- **The CRC verifies, it does not identify.** A zip under the wrong name finds
+  no board rather than the right one, which is the same rule MAME follows and
+  the reason `roms/captcomm.zip` here turned out to be `captcommr1`: 12 of 12
+  CRCs matched that set and none matched `captcomm`, so it runs off
+  `boards/captcommr1.board` and `boards/captcomm.board` correctly refuses it.
+  Naming a set by hashing it is a different feature, and no emulator of this
+  hardware has it.
+- **The name fallback inside a zip is zip-only.** A chip that is not under the
+  name the board file uses is found by what it hashes to, because a zip's own
+  directory records that (§8.2); a set unpacked into a directory would have to
+  be read whole to earn the same, so there it is still matched by name. MAME
+  draws the line in the same place.
+- **The window has not seen most of this.** The seven sets boot and their
+  pictures change on every one of 600 frames, which is what says nothing is
+  stuck blank, but no window opened in this environment to look at them. M7's
+  sweep is the shape that answer belongs in: it already reports a blank picture
+  and a still one, and 194 boards is exactly the input it was written for.
+
 ### M6: Save states
 
 Deliverables: versioned states with slots, hotkeys and menu pages, each row
@@ -966,4 +1069,6 @@ Audio:
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE). The board files under `boards/` are
+transcribed from MAME's CPS-1 driver and carry its BSD-3-Clause terms; see
+[`boards/README.md`](boards/README.md).

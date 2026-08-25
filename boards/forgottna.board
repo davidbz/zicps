@@ -1,0 +1,50 @@
+# Board file for MAME's `forgottna`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 lw11.12f crc=0x73e920b7
+program = 0x000001 0x020000 byte16 lw15.12h crc=0x50d7012d
+program = 0x040000 0x020000 byte16 lw10.13f crc=0xbea45994
+program = 0x040001 0x020000 byte16 lw14.13h crc=0x539b2339
+program = 0x080000 0x080000 word   lw-07.10g crc=0xfd252a26
+
+gfx = 0x000000 0x020000 byte64 lw_2.2b crc=0x4bd75fee
+gfx = 0x000001 0x020000 byte64 lw_1.2a crc=0x65f41485
+gfx = 0x000002 0x080000 word64 lw-08.9b crc=0x25a8e43c
+gfx = 0x000004 0x080000 word64 lw-05.6d crc=0xe4552fd7
+gfx = 0x000006 0x020000 byte64 lw_30.8h crc=0xb385954e
+gfx = 0x000007 0x020000 byte64 lw_29.8f crc=0x7bda1ac6
+gfx = 0x100000 0x020000 byte64 lw_4.3b crc=0x50cf757f
+gfx = 0x100001 0x020000 byte64 lw_3.3a crc=0xc03ef278
+gfx = 0x100006 0x020000 byte64 lw_32.9h crc=0x30967a15
+gfx = 0x100007 0x020000 byte64 lw_31.9f crc=0xc49d37fb
+gfx = 0x200000 0x080000 word64 lw-02.6b crc=0x43e6c5c8
+gfx = 0x200002 0x020000 byte64 lw_14.10b crc=0x82862cce
+gfx = 0x200003 0x020000 byte64 lw_13.10a crc=0xb81c0e96
+gfx = 0x200004 0x080000 word64 lw-06.9d crc=0x5b9edffc
+gfx = 0x200006 0x020000 byte64 lw_26.10e crc=0x57bcd032
+gfx = 0x200007 0x020000 byte64 lw_25.10c crc=0xbac91554
+gfx = 0x300002 0x020000 byte64 lw_16.11b crc=0x40b26554
+gfx = 0x300003 0x020000 byte64 lw_15.11a crc=0x1b7d2e07
+gfx = 0x300006 0x020000 byte64 lw_28.11e crc=0xa805ad30
+gfx = 0x300007 0x020000 byte64 lw_27.11c crc=0x103c1bd2
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites 0x00000 0x07fff 0
+gfx_bank = scroll1 0x00000 0x1ffff 0
+gfx_bank = stars 0x00000 0x1ffff 1
+gfx_bank = scroll2 0x00000 0x1ffff 1
+gfx_bank = scroll3 0x00000 0x1ffff 1

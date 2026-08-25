@@ -1,0 +1,50 @@
+# Board file for MAME's `punisherh`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 psh_26.11e crc=0x6ad2bb83
+program = 0x000001 0x020000 byte16 psh_30.11f crc=0x058d3659
+program = 0x040000 0x020000 byte16 psh_27.12e crc=0x579f4fd3
+program = 0x040001 0x020000 byte16 psh_31.12f crc=0x2c9f70b5
+program = 0x080000 0x020000 byte16 psh_24.9e crc=0xfaa14841
+program = 0x080001 0x020000 byte16 psh_28.9f crc=0x5c5b1f20
+program = 0x0c0000 0x020000 byte16 psh_25.10e crc=0x724fdfda
+program = 0x0c0001 0x020000 byte16 psh_29.10f crc=0x779cf901
+program = 0x100000 0x080000 word   ps_21.6f crc=0x8affa5a9
+
+gfx = 0x000000 0x080000 word64 ps-1m.3a crc=0x77b7ccab
+gfx = 0x000002 0x080000 word64 ps-3m.5a crc=0x0122720b
+gfx = 0x000004 0x080000 word64 ps-2m.4a crc=0x64fa58d4
+gfx = 0x000006 0x080000 word64 ps-4m.6a crc=0x60da42c8
+gfx = 0x200000 0x080000 word64 ps-5m.7a crc=0xc54ea839
+gfx = 0x200002 0x080000 word64 ps-7m.9a crc=0x04c5acbd
+gfx = 0x200004 0x080000 word64 ps-6m.8a crc=0xa544f4cc
+gfx = 0x200006 0x080000 word64 ps-8m.10a crc=0x8f02f436
+
+audio = 0x000000 0x008000 byte   ps_q.5k crc=0x49ff4446
+audio = 0x010000 0x018000 byte   ps_q.5k 0x8000 crc=0x49ff4446
+
+qsound = 0x000000 0x080000 byte   ps-q1.1k crc=0x31fd8726
+qsound = 0x080000 0x080000 byte   ps-q2.2k crc=0x980a9eef
+qsound = 0x100000 0x080000 byte   ps-q3.3k crc=0x0dd44491
+qsound = 0x180000 0x080000 byte   ps-q4.4k crc=0xbed42f03
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x12
+priority        = 0x14 0x16 0x08 0x0a
+palette_control = 0x0c
+layer_enable    = 0x04 0x02 0x20 0x00 0x00
+id              = 0x0e 0x0c00
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x08000 0x0ffff 1
+
+kabuki = 0x67452103 0x75316024 0x2222 0x22

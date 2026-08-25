@@ -18,6 +18,7 @@ const audio = @import("audio");
 const input = @import("input");
 const config = @import("config");
 const snow = @import("snow");
+const boards = @import("boards");
 const shell = @import("shell");
 
 const rl = @cImport(@cInclude("raylib.h"));
@@ -161,11 +162,23 @@ fn parseArgs(args: *std.process.Args.Iterator) Options {
 const Machine = struct {
     b: board.Board,
     rom: romset.Set,
+    /// Which board file this machine was built from, for the card: the name
+    /// of the file the user supplied, or of the board that shipped with this
+    /// build. Only the load knows which of the two won.
+    source: [max_source]u8 = @splat(0),
+
+    fn from(m: *const Machine) []const u8 {
+        return std.mem.sliceTo(&m.source, 0);
+    }
 
     fn deinit(m: *Machine, gpa: std.mem.Allocator) void {
         m.rom.deinit(gpa);
     }
 };
+
+/// Room for a file name on the card. Not a path: a card that says which
+/// directory it read is a card nobody can read.
+const max_source = 64;
 
 /// Reads a set and its board file, saying why in `diag` rather than exiting:
 /// the menu can load a set that turns out to be wrong without the window
@@ -185,15 +198,39 @@ fn loadSet(
         return error.BadBoardFile;
     };
 
+    // What a set is called is what MAME calls it, which is what the boards
+    // that ship with this build are named after (DESIGN.md §8.1). The user's
+    // own file still wins: theirs is the board in front of them, and ours is
+    // a transcription of a table.
+    const name = std.fs.path.stem(std.fs.path.basename(board_file));
+
+    var machine = Machine{ .b = undefined, .rom = undefined };
     const cwd = std.Io.Dir.cwd();
-    const text = cwd.readFileAlloc(io, board_file, gpa, .limited(max_board_bytes)) catch |err| {
-        diag.set("no board file at {s} ({t})", .{ board_file, err });
+    var owned = true;
+    const text = cwd.readFileAlloc(io, board_file, gpa, .limited(max_board_bytes)) catch |err| shipped: {
+        const built_in = if (board_path == null) boards.find(name) else null;
+        if (built_in) |ours| {
+            owned = false;
+            label(&machine.source, "{s} (built in)", .{name});
+            break :shipped ours;
+        }
+        diag.set("no board file at {s} ({t}), and none for `{s}` ships with this build", .{ board_file, err, name });
         return error.BadBoardFile;
     };
-    defer gpa.free(text);
+    defer if (owned) gpa.free(text);
+    if (owned) label(&machine.source, "{s}", .{std.fs.path.basename(board_file)});
 
-    const b = try board.parse(text, diag);
-    return .{ .b = b, .rom = try romset.load(gpa, io, cwd, set, &b, diag) };
+    machine.b = try board.parse(text, diag);
+    machine.rom = try romset.load(gpa, io, cwd, set, &machine.b, diag);
+    return machine;
+}
+
+/// Fills a card's line, cut to fit rather than refused: half a name still says
+/// which file this was.
+fn label(into: *[max_source]u8, comptime fmt: []const u8, args: anytype) void {
+    var w = std.Io.Writer.fixed(into[0 .. into.len - 1]);
+    w.print(fmt, args) catch {};
+    into[w.buffered().len] = 0;
 }
 
 /// The half of a load failure that only the command line can print: what a
@@ -202,7 +239,9 @@ fn loadSet(
 fn explainBoard() void {
     std.debug.print(
         \\A CPS-1.5 board keeps its configuration in battery-backed RAM, so zicps needs
-        \\a board file describing this board before it can run the set. See DESIGN.md §8.1.
+        \\a board file describing this board before it can run the set. One ships for every
+        \\set MAME names, under boards/, and is found by the set's own name; a file beside
+        \\the set or --board wins over it. See DESIGN.md §8.1.
         \\
     , .{});
 }
@@ -438,10 +477,8 @@ fn programSum(program: []const u8) u16 {
 /// The card the menu shows beside itself: what the set and the board file
 /// turned out to say, all of it read out of the two files the user supplied.
 /// Built when the set goes in, because none of it changes while the game plays.
-fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8, board_path: ?[]const u8) void {
-    var board_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const board_file = board_path orelse beside(&board_buf, set, ".board") catch set;
-    shell.cardStart(ui, std.fs.path.basename(set), std.fs.path.basename(board_file));
+fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8) void {
+    shell.cardStart(ui, std.fs.path.basename(set), m.from());
 
     var regions: [4]usize = @splat(0);
     for (m.b.romList()) |rom| regions[@intFromEnum(rom.region)] += 1;
@@ -600,7 +637,7 @@ fn windowed(
     if (machine.*) |*m| {
         startMachine(c, cpu, m);
         loadNv(io, c, set);
-        describeBoard(&ui, m, set, args.board);
+        describeBoard(&ui, m, set);
     }
 
     var diag = board.Diag{};
@@ -635,7 +672,7 @@ fn windowed(
                 set = keepPath(&path_buf, p);
                 startMachine(c, cpu, &next);
                 loadNv(io, c, set);
-                describeBoard(&ui, &next, set, null);
+                describeBoard(&ui, &next, set);
                 ui.status("{s}: {d} KiB program, {d} KiB graphics", .{
                     std.fs.path.basename(set),
                     next.rom.program.len >> 10,

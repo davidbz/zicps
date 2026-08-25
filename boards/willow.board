@@ -1,0 +1,42 @@
+# Board file for MAME's `willow`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 wle_30.11f crc=0x15372aa2
+program = 0x000001 0x020000 byte16 wle_35.11h crc=0x2e64623b
+program = 0x040000 0x020000 byte16 wlu_31.12f crc=0x0eb48a83
+program = 0x040001 0x020000 byte16 wlu_36.12h crc=0x36100209
+program = 0x080000 0x080000 word   wlm-32.8h crc=0xdfd9f643
+
+gfx = 0x000000 0x080000 word64 wlm-7.7a crc=0xafa74b73
+gfx = 0x000002 0x080000 word64 wlm-5.9a crc=0x12a0dc0b
+gfx = 0x000004 0x080000 word64 wlm-3.3a crc=0xc6f2abce
+gfx = 0x000006 0x080000 word64 wlm-1.5a crc=0x4aa4c6d3
+gfx = 0x200000 0x020000 byte64 wl_24.7d crc=0x6f0adee5
+gfx = 0x200001 0x020000 byte64 wl_14.7c crc=0x9cf3027d
+gfx = 0x200002 0x020000 byte64 wl_26.9d crc=0xf09c8ecf
+gfx = 0x200003 0x020000 byte64 wl_16.9c crc=0xe35407aa
+gfx = 0x200004 0x020000 byte64 wl_20.3d crc=0x84992350
+gfx = 0x200005 0x020000 byte64 wl_10.3c crc=0xb87b5a36
+gfx = 0x200006 0x020000 byte64 wl_22.5d crc=0xfd3f89f0
+gfx = 0x200007 0x020000 byte64 wl_12.5c crc=0x7da49d69
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x30
+priority        = 0x2e 0x2c 0x2a 0x28
+palette_control = 0x26
+layer_enable    = 0x20 0x10 0x08 0x00 0x00
+id              = 0x24 0x0003
+
+bank_sizes = 0x8000 0x4000 0x0 0x0
+gfx_bank = sprites 0x00000 0x04fff 0
+gfx_bank = scroll3 0x05000 0x06fff 0
+gfx_bank = scroll1 0x07000 0x07fff 0
+gfx_bank = scroll2 0x00000 0x03fff 1

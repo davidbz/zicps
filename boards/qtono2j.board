@@ -1,0 +1,44 @@
+# Board file for MAME's `qtono2j`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 tn2j_30.11e crc=0x9226eb5e
+program = 0x000001 0x020000 byte16 tn2j_37.11f crc=0xd1d30da1
+program = 0x040000 0x020000 byte16 tn2j_31.12e crc=0x015e6a8a
+program = 0x040001 0x020000 byte16 tn2j_38.12f crc=0x1f139bcc
+program = 0x080000 0x020000 byte16 tn2j_28.9e crc=0x86d27f71
+program = 0x080001 0x020000 byte16 tn2j_35.9f crc=0x7a1ab87d
+program = 0x0c0000 0x020000 byte16 tn2j_29.10e crc=0x9c384e99
+program = 0x0c0001 0x020000 byte16 tn2j_36.10f crc=0x4c4b2a0a
+
+gfx = 0x000000 0x080000 word64 tn2-02m.4a crc=0xf2016a34
+gfx = 0x000002 0x080000 word64 tn2-04m.6a crc=0x094e0fb1
+gfx = 0x000004 0x080000 word64 tn2-01m.3a crc=0xcb950cf9
+gfx = 0x000006 0x080000 word64 tn2-03m.5a crc=0x18a5bf59
+gfx = 0x200000 0x080000 word64 tn2-11m.4c crc=0xd0edd30b
+gfx = 0x200002 0x080000 word64 tn2-13m.6c crc=0x426621c3
+gfx = 0x200004 0x080000 word64 tn2-10m.3c crc=0xa34ece70
+gfx = 0x200006 0x080000 word64 tn2-12m.5c crc=0xe04ff2f4
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+in2             = 0x36
+in3             = 0x38
+out2            = 0x34
+
+bank_sizes = 0x8000 0x8000 0x8000 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3|stars 0x00000 0x07fff 0
+gfx_bank = sprites|scroll1|scroll2|scroll3|stars 0x08000 0x0ffff 1
+gfx_bank = sprites|scroll1|scroll2|scroll3|stars 0x10000 0x17fff 2

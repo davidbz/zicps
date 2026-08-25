@@ -6,9 +6,9 @@ It emulates the whole board: the 68000, the encrypted Z80 sound CPU, the CPS-A
 and CPS-B-21 video chips, the QSound DSP, the control panel, save states and the
 board's own settings EEPROM — plus a small, friendly desktop app to play in.
 
-zicps doesn't ship with any games, and it ships no database of them either. To
-run a board you supply two things: your own legally obtained ROM set, and a
-**board file** describing that board's configuration.
+zicps doesn't ship with any games. To run a board you supply your own legally
+obtained ROM set, and zicps supplies the **board file** that says how to read
+it — or you write your own.
 
 ## The board file
 
@@ -18,10 +18,22 @@ RAM held up by a battery. When the battery dies the board keeps every chip and
 forgets how to be itself; that's what people mean when they call these boards
 "suicidal".
 
-zicps models that battery as a file you supply next to your ROM set: plain
-`key = value` text you can read and edit, holding exactly what the battery held.
-No board file, no boot — and if it's wrong, zicps says what it needed rather
-than drawing garbage.
+zicps models that battery as plain `key = value` text you can read and edit,
+holding exactly what the battery held. One ships for nearly every CPS-1/1.5 set
+MAME lists, under [`boards/`](boards/), transcribed from MAME's published tables
+and embedded in the binary — so `zicps sf2.zip` just runs.
+
+Three places are looked at, in this order, and the first one found wins:
+
+1. `--board <path>`, if you passed one.
+2. `<set>.board` beside your set — your own file always beats ours.
+3. `boards/<set name>`, the shipped one, found by the set's name the way MAME
+   names it.
+
+No board file anywhere, no boot — and if the one you have is wrong, zicps says
+what it needed rather than drawing garbage. The shipped ones are a convenience,
+not an authority: most have never been booted by anyone here, and outside the
+QSound sets they carry no sound at all. See [`boards/README.md`](boards/README.md).
 
 ## Status
 
@@ -90,4 +102,6 @@ community research, all credited in [`DESIGN.md`](DESIGN.md) §11.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE). The board files under `boards/` are
+transcribed from MAME's CPS-1 driver and carry its BSD-3-Clause terms; see
+[`boards/README.md`](boards/README.md).

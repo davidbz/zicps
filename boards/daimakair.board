@@ -1,0 +1,37 @@
+# Board file for MAME's `daimakair`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   damj_23.8f crc=0xc3b248ec
+program = 0x080000 0x080000 word   damj_22.7f crc=0x595ff2f3
+
+gfx = 0x000000 0x080000 word64 dam_01.3a crc=0x0ba9c0b0
+gfx = 0x000002 0x080000 word64 dam_02.4a crc=0x5d760ab9
+gfx = 0x000004 0x080000 word64 dam_03.5a crc=0x4ba90b59
+gfx = 0x000006 0x080000 word64 dam_04.6a crc=0x4bdee9de
+gfx = 0x200000 0x080000 word64 dam_05.7a crc=0x7dc61b94
+gfx = 0x200002 0x080000 word64 dam_06.8a crc=0xfde89758
+gfx = 0x200004 0x080000 word64 dam_07.9a crc=0xec351d78
+gfx = 0x200006 0x080000 word64 dam_08.10a crc=0xee2acc1e
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites 0x00000 0x01fff 0
+gfx_bank = scroll1 0x02000 0x02fff 0
+gfx_bank = scroll2 0x04000 0x07fff 0
+gfx_bank = scroll3 0x00000 0x1ffff 1
+gfx_bank = sprites 0x02000 0x03fff 1

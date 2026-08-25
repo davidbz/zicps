@@ -1,0 +1,49 @@
+# Board file for MAME's `chikij`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 chj_36a.12f crc=0xec1328d8
+program = 0x000001 0x020000 byte16 chj_42a.12h crc=0x4ae13503
+program = 0x040000 0x020000 byte16 chj_37a.13f crc=0x46d2cf7b
+program = 0x040001 0x020000 byte16 chj_43a.13h crc=0x8d387fe8
+program = 0x080000 0x020000 byte16 ch_34.10f crc=0x609ed2f9
+program = 0x080001 0x020000 byte16 ch_40.10h crc=0xbe0d8301
+program = 0x0c0000 0x020000 byte16 ch_35.11f crc=0xb810867f
+program = 0x0c0001 0x020000 byte16 ch_41.11h crc=0x8ad96155
+
+gfx = 0x000000 0x020000 byte64 ch_09.4b crc=0x567ab3ca
+gfx = 0x000001 0x020000 byte64 ch_01.4a crc=0x7f3b7b56
+gfx = 0x000002 0x020000 byte64 ch_13.9b crc=0x12a7a8ba
+gfx = 0x000003 0x020000 byte64 ch_05.9a crc=0x6c1afb9a
+gfx = 0x000004 0x020000 byte64 ch_24.5e crc=0x9cb6e6bc
+gfx = 0x000005 0x020000 byte64 ch_17.5c crc=0xfe490846
+gfx = 0x000006 0x020000 byte64 ch_38.8h crc=0x6e5c8cb6
+gfx = 0x000007 0x020000 byte64 ch_32.8f crc=0x317d27b0
+gfx = 0x100000 0x020000 byte64 ch_10.5b crc=0xe8251a9b
+gfx = 0x100001 0x020000 byte64 ch_02.5a crc=0x7c8c88fb
+gfx = 0x100002 0x020000 byte64 ch_14.10b crc=0x4012ec4b
+gfx = 0x100003 0x020000 byte64 ch_06.10a crc=0x81884b2b
+gfx = 0x100004 0x020000 byte64 ch_25.7e crc=0x1dfcbac5
+gfx = 0x100005 0x020000 byte64 ch_18.7c crc=0x516a34d1
+gfx = 0x100006 0x020000 byte64 ch_39.9h crc=0x872fb2a4
+gfx = 0x100007 0x020000 byte64 ch_33.9f crc=0x30dc5ded
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x12
+priority        = 0x14 0x16 0x18 0x1a
+palette_control = 0x1c
+layer_enable    = 0x08 0x20 0x10 0x00 0x00
+id              = 0x1e 0x0404
+
+bank_sizes = 0x4000 0x4000 0x0 0x0
+gfx_bank = sprites 0x00000 0x02fff 0
+gfx_bank = scroll1 0x03000 0x03fff 0
+gfx_bank = scroll2 0x04000 0x06fff 1
+gfx_bank = scroll3 0x07000 0x07fff 1

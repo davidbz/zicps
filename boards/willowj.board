@@ -1,0 +1,58 @@
+# Board file for MAME's `willowj`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 wl_36.12f crc=0x2b0d7cbc
+program = 0x000001 0x020000 byte16 wl_42.12h crc=0x1ac39615
+program = 0x040000 0x020000 byte16 wl_37.13f crc=0x30a717fa
+program = 0x040001 0x020000 byte16 wl_43.13h crc=0xd0dddc9e
+program = 0x080000 0x020000 byte16 wl_34.10f crc=0x23a84f7a
+program = 0x080001 0x020000 byte16 wl_40.10h crc=0xc7a0ed21
+program = 0x0c0000 0x020000 byte16 wl_35.11f crc=0x5eff7951
+program = 0x0c0001 0x020000 byte16 wl_41.11h crc=0x8d6477a3
+
+gfx = 0x000000 0x020000 byte64 wl_09.4b crc=0x05aa71b4
+gfx = 0x000001 0x020000 byte64 wl_01.4a crc=0x08c2df12
+gfx = 0x000002 0x020000 byte64 wl_13.9b crc=0x1f7c87cd
+gfx = 0x000003 0x020000 byte64 wl_05.9a crc=0xf5254bf2
+gfx = 0x000004 0x020000 byte64 wl_24.5e crc=0xd9d73ba1
+gfx = 0x000005 0x020000 byte64 wl_17.5c crc=0xa652f30c
+gfx = 0x000006 0x020000 byte64 wl_38.8h crc=0xf6f9111b
+gfx = 0x000007 0x020000 byte64 wl_32.8f crc=0x10f64027
+gfx = 0x100000 0x020000 byte64 wl_10.5b crc=0xdbba0a3f
+gfx = 0x100001 0x020000 byte64 wl_02.5a crc=0x86fba7a5
+gfx = 0x100002 0x020000 byte64 wl_14.10b crc=0x7d5798b2
+gfx = 0x100003 0x020000 byte64 wl_06.10a crc=0x1f052948
+gfx = 0x100004 0x020000 byte64 wl_25.7e crc=0x857d17d2
+gfx = 0x100005 0x020000 byte64 wl_18.7c crc=0x316c7fbc
+gfx = 0x100006 0x020000 byte64 wl_39.9h crc=0xe6fce9b0
+gfx = 0x100007 0x020000 byte64 wl_33.9f crc=0xa15d5517
+gfx = 0x200000 0x020000 byte64 wl_11.7b crc=0x6f0adee5
+gfx = 0x200001 0x020000 byte64 wl_03.7a crc=0x9cf3027d
+gfx = 0x200002 0x020000 byte64 wl_15.11b crc=0xf09c8ecf
+gfx = 0x200003 0x020000 byte64 wl_07.11a crc=0xe35407aa
+gfx = 0x200004 0x020000 byte64 wl_26.8e crc=0x84992350
+gfx = 0x200005 0x020000 byte64 wl_19.8c crc=0xb87b5a36
+gfx = 0x200006 0x020000 byte64 wl_28.10e crc=0xfd3f89f0
+gfx = 0x200007 0x020000 byte64 wl_21.10c crc=0x7da49d69
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x30
+priority        = 0x2e 0x2c 0x2a 0x28
+palette_control = 0x26
+layer_enable    = 0x20 0x10 0x08 0x00 0x00
+id              = 0x24 0x0003
+
+bank_sizes = 0x4000 0x4000 0x4000 0x0
+gfx_bank = sprites 0x00000 0x03fff 0
+gfx_bank = sprites 0x04000 0x04fff 1
+gfx_bank = scroll3 0x05000 0x06fff 1
+gfx_bank = scroll1 0x07000 0x07fff 1
+gfx_bank = scroll2 0x00000 0x03fff 2

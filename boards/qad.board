@@ -1,0 +1,37 @@
+# Board file for MAME's `qad`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 qdu_36a.12f crc=0xde9c24a0
+program = 0x000001 0x020000 byte16 qdu_42a.12h crc=0xcfe36f0c
+program = 0x040000 0x020000 byte16 qdu_37a.13f crc=0x10d22320
+program = 0x040001 0x020000 byte16 qdu_43a.13h crc=0x15e6beb9
+
+gfx = 0x000000 0x020000 byte64 qd_09.4b crc=0x8c3f9f44
+gfx = 0x000001 0x020000 byte64 qd_01.4a crc=0xf688cf8f
+gfx = 0x000002 0x020000 byte64 qd_13.9b crc=0xafbd551b
+gfx = 0x000003 0x020000 byte64 qd_05.9a crc=0xc3db0910
+gfx = 0x000004 0x020000 byte64 qd_24.5e crc=0x2f1bd0ec
+gfx = 0x000005 0x020000 byte64 qd_17.5c crc=0xa812f9e2
+gfx = 0x000006 0x020000 byte64 qd_38.8h crc=0xccdddd1f
+gfx = 0x000007 0x020000 byte64 qd_32.8f crc=0xa8d295d3
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x2c
+priority        = none none none none
+palette_control = 0x12
+layer_enable    = 0x14 0x02 0x14 0x00 0x00
+in2             = 0x36
+
+bank_sizes = 0x4000 0x0 0x0 0x0
+gfx_bank = sprites 0x00000 0x03fff 0
+gfx_bank = scroll1 0x00000 0x03fff 0
+gfx_bank = scroll2 0x00000 0x03fff 0
+gfx_bank = scroll3 0x00000 0x03fff 0

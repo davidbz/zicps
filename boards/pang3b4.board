@@ -1,0 +1,52 @@
+# Board file for MAME's `pang3b4`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 22.u30 crc=0xbf3ebe68
+program = 0x000001 0x020000 byte16 26.u35 crc=0xd20db83c
+program = 0x040000 0x020000 byte16 23.u31 crc=0x94d494c2
+program = 0x040001 0x020000 byte16 27.u36 crc=0x38e43390
+program = 0x080000 0x020000 byte16 20.u28 crc=0x8daf3814
+program = 0x080001 0x020000 byte16 24.u33 crc=0xbb34e444
+program = 0x0c0000 0x020000 byte16 21.u29 crc=0x54d0b680
+program = 0x0c0001 0x020000 byte16 25.u34 crc=0xd666ec70
+
+gfx = 0x000000 0x040000 byte64 14.u25 crc=0xd2b764a9
+gfx = 0x000001 0x040000 byte64 06.u15 crc=0xfb68be4e
+gfx = 0x200000 0x040000 byte64 13.u24 crc=0x0c73a1c7
+gfx = 0x200001 0x040000 byte64 05.u14 crc=0x475a5ef1
+gfx = 0x000004 0x040000 byte64 10.u21 crc=0x79673708
+gfx = 0x000005 0x040000 byte64 02.u11 crc=0xf706b466
+gfx = 0x200004 0x040000 byte64 09.u20 crc=0x6e36e963
+gfx = 0x200005 0x040000 byte64 01.u10 crc=0x7d15b9d7
+gfx = 0x000002 0x040000 byte64 16.u27 crc=0x3e293482
+gfx = 0x000003 0x040000 byte64 08.u17 crc=0x7e0ca927
+gfx = 0x200002 0x040000 byte64 15.u26 crc=0xa933434f
+gfx = 0x200003 0x040000 byte64 07.u16 crc=0x83b3fa5e
+gfx = 0x000006 0x040000 byte64 12.u23 crc=0x3c4dfb4f
+gfx = 0x000007 0x040000 byte64 04.u13 crc=0x44cd5e95
+gfx = 0x200006 0x040000 byte64 11.u22 crc=0x29194b90
+gfx = 0x200007 0x040000 byte64 03.u12 crc=0x7e28974e
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites 0x00000 0x07fff 0
+gfx_bank = scroll2 0x00000 0x07fff 0
+gfx_bank = sprites 0x08000 0x0ffff 1
+gfx_bank = scroll1 0x08000 0x0ffff 1
+gfx_bank = scroll2 0x08000 0x0ffff 1
+gfx_bank = scroll3 0x08000 0x0ffff 1
