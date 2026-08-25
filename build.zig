@@ -115,34 +115,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // --- the program ---------------------------------------------------------
-    const exe_module = b.createModule(.{
-        .root_source_file = b.path("src/main.zig"),
+    // raylib is a lazy dependency, but zicps always needs it: the call below
+    // still runs on every build after a fresh clone, because a build script
+    // cannot see which step was asked for. The window is built at the bottom
+    // of this file, once the test and check steps it hangs off exist.
+    const raylib_dep = b.lazyDependency("raylib", .{
         .target = target,
         .optimize = optimize,
-        .imports = &.{
-            .{ .name = "board", .module = board },
-            .{ .name = "romset", .module = romset },
-            .{ .name = "cps", .module = cps },
-            .{ .name = "scheduler", .module = scheduler },
-            .{ .name = "video", .module = video },
-            .{ .name = "audio", .module = audio },
-            .{ .name = "input", .module = input },
-            .{ .name = "config", .module = config },
-        },
+        // Nothing here draws a mesh, and rmodels is the bulk of the build.
+        .rmodels = false,
     });
-    const exe = b.addExecutable(.{ .name = "zicps", .root_module = exe_module });
-    b.installArtifact(exe);
-
-    const run = b.addRunArtifact(exe);
-    run.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run.addArgs(args);
-    b.step("run", "Run zicps").dependOn(&run.step);
 
     // A fast compile-only pass over everything, for editors (zls) and CI:
     // catches type errors without linking or running anything.
     const check_step = b.step("check", "Check that everything compiles");
-    check_step.dependOn(&exe.step);
 
     // --- tests ---------------------------------------------------------------
     const test_step = b.step("test", "Run unit and headless regression tests");
@@ -211,12 +197,79 @@ pub fn build(b: *std.Build) void {
     }
 
     const modules = [_]*std.Build.Module{
-        board, romset, video,  cps,        scheduler, input,      config,
-        audio, kabuki, qsound, soundboard, snow,      exe_module, system_tests,
+        board, romset, video,  cps,        scheduler, input,        config,
+        audio, kabuki, qsound, soundboard, snow,      system_tests,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });
         test_step.dependOn(&b.addRunArtifact(tests).step);
         check_step.dependOn(&tests.step);
     }
+
+    // --- the program ---------------------------------------------------------
+    // The window, and the only two modules allowed to reach raylib (§3.2).
+    // Everything above is wired without it and tested without a display.
+    const raylib = raylib_dep orelse return;
+
+    // The menu's arithmetic is testable without a window; the drawing is not.
+    // This links raylib because `shell.zig` imports its header, and runs
+    // nothing that needs a display.
+    const shell = b.createModule(.{
+        .root_source_file = b.path("src/ui/shell.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true, // raylib.h comes in through @cImport
+        .imports = &.{
+            .{ .name = "config", .module = config },
+            .{ .name = "input", .module = input },
+        },
+    });
+    shell.linkLibrary(raylib.artifact("raylib"));
+
+    const exe_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "romset", .module = romset },
+            .{ .name = "cps", .module = cps },
+            .{ .name = "scheduler", .module = scheduler },
+            .{ .name = "video", .module = video },
+            .{ .name = "audio", .module = audio },
+            .{ .name = "input", .module = input },
+            .{ .name = "config", .module = config },
+            .{ .name = "snow", .module = snow },
+            .{ .name = "shell", .module = shell },
+        },
+    });
+    exe_module.linkLibrary(raylib.artifact("raylib"));
+
+    const exe = b.addExecutable(.{ .name = "zicps", .root_module = exe_module });
+    // ponytail: zig folds raylib's system libs (libGL.so, libX11.so, ...) into
+    // libraylib.a as archive members (ziglang/zig#20476). LLD warns once per
+    // member, and the build runner turns any unexpected linker stderr into a
+    // failed step — even though the same libraries are already on the link
+    // line as -lGL -lX11 ... and the link is fine. The self-hosted ELF linker
+    // skips them silently, but only ELF: the COFF and MachO backends cannot
+    // link this yet, so those keep LLD. Drop this once zig stops archiving
+    // .so paths.
+    const lld = target.result.os.tag != .linux;
+    if (!lld) exe.use_lld = false;
+    b.installArtifact(exe);
+    check_step.dependOn(&exe.step);
+
+    for ([_]*std.Build.Module{ shell, exe_module }) |module| {
+        const tests = b.addTest(.{ .root_module = module });
+        if (!lld) tests.use_lld = false;
+        test_step.dependOn(&b.addRunArtifact(tests).step);
+        check_step.dependOn(&tests.step);
+    }
+
+    const run = b.addRunArtifact(exe);
+    run.setCwd(b.path(".")); // roms/ is resolved relative to the project
+    run.step.dependOn(b.getInstallStep());
+    if (b.args) |args| run.addArgs(args);
+    b.step("run", "Run zicps").dependOn(&run.step);
 }

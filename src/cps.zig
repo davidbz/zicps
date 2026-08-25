@@ -125,6 +125,162 @@ pub const Inputs = struct {
     panel: u8 = 0,
 };
 
+// ----------------------------------------------------------------- eeprom
+
+/// A QSound board has no DIP switches, so everything a DIP switch would have
+/// said lives in a 93C46 serial EEPROM and is edited in the board's own service
+/// menu (DESIGN.md §8.4). Sixty-four words, one wire in and one out.
+pub const eeprom_words = 64;
+pub const eeprom_bytes = eeprom_words * 2;
+/// An erased cell is all ones, which is what an unprogrammed chip holds and
+/// what a board with no `.nv` file beside it comes up with.
+pub const eeprom_erased = 0xffff;
+
+/// The three wires the 68000 drives, on the low byte of `0xf1c006`.
+const eeprom_di = 0x10;
+const eeprom_clk = 0x20;
+const eeprom_cs = 0x40;
+
+/// Start bit, two opcode bits, six address bits: what the chip listens for
+/// before it does anything at all.
+const eeprom_command_bits = 9;
+const eeprom_data_bits = 16;
+/// A read clocks out a dummy zero before the word, so its shift register is a
+/// bit wider than the word it holds.
+const eeprom_read_bits = eeprom_data_bits + 1;
+
+const EepromOp = enum(u2) { special, write, read, erase };
+/// `special` puts its own two bits at the top of the address field.
+const EepromSpecial = enum(u2) { disable, write_all, erase_all, enable };
+
+pub const Eeprom = struct {
+    data: [eeprom_words]u16 = @splat(eeprom_erased),
+    /// Set by any cell that changed, cleared by the frontend once the sidecar
+    /// file has been rewritten. A game writes its settings a word at a time.
+    dirty: bool = false,
+
+    cs: bool = false,
+    clk: bool = false,
+    /// Erase and write are refused until an enable command arrives, which is
+    /// what stops a glitching board from wiping its own settings.
+    writable: bool = false,
+
+    /// What has been clocked in: the command, then a write's data word.
+    shift: u16 = 0,
+    bits: u8 = 0,
+    in_data: bool = false,
+    /// The data word about to arrive goes to every cell, not to `addr`.
+    all: bool = false,
+    addr: u6 = 0,
+
+    /// What is being clocked out, MSB first, and how much of it is left.
+    out: u32 = 0,
+    out_bits: u8 = 0,
+
+    /// The one wire the 68000 reads back. High while idle: a real chip pulls it
+    /// there when it is ready for the next command, and a driver polls for it.
+    pub fn read(e: *const Eeprom) u1 {
+        if (e.out_bits == 0) return 1;
+        return @truncate(e.out >> @intCast(e.out_bits - 1));
+    }
+
+    pub fn write(e: *Eeprom, value: u8) void {
+        const cs = value & eeprom_cs != 0;
+        const clk = value & eeprom_clk != 0;
+        // Dropping chip select abandons whatever was half said. The enable
+        // latch is not part of that: it holds until a disable command.
+        if (!cs) {
+            e.* = .{ .data = e.data, .dirty = e.dirty, .writable = e.writable };
+            return;
+        }
+        defer e.clk = clk;
+        e.cs = true;
+        if (!clk or e.clk) return;
+        e.shiftIn(@intFromBool(value & eeprom_di != 0));
+    }
+
+    /// One rising clock edge.
+    fn shiftIn(e: *Eeprom, di: u1) void {
+        if (e.out_bits != 0) {
+            e.out_bits -= 1;
+            return;
+        }
+        // Leading zeros are not part of a command: the chip waits for the
+        // start bit, so a driver may clock as many of them as it likes. A data
+        // word has no start bit and every one of its zeros counts.
+        if (!e.in_data and e.bits == 0 and di == 0) return;
+        e.shift = e.shift << 1 | di;
+        e.bits += 1;
+
+        if (e.in_data) {
+            if (e.bits < eeprom_data_bits) return;
+            const word = e.shift;
+            const all = e.all;
+            e.idle();
+            if (!all) return e.poke(e.addr, word);
+            for (0..eeprom_words) |i| e.poke(@intCast(i), word);
+            return;
+        }
+        if (e.bits < eeprom_command_bits) return;
+        e.command();
+    }
+
+    fn command(e: *Eeprom) void {
+        const addr: u6 = @truncate(e.shift);
+        const op: EepromOp = @enumFromInt(@as(u2, @truncate(e.shift >> 6)));
+        e.addr = addr;
+        e.idle();
+        switch (op) {
+            .read => {
+                e.out = e.data[addr];
+                e.out_bits = eeprom_read_bits;
+            },
+            .write => {
+                e.in_data = true;
+            },
+            .erase => e.poke(addr, eeprom_erased),
+            .special => switch (@as(EepromSpecial, @enumFromInt(@as(u2, @truncate(addr >> 4))))) {
+                .enable => e.writable = true,
+                .disable => e.writable = false,
+                .erase_all => for (0..eeprom_words) |i| e.poke(@intCast(i), eeprom_erased),
+                // Write-all takes its word the way a write does; every cell
+                // gets it rather than the one the address field named.
+                .write_all => {
+                    e.in_data = true;
+                    e.all = true;
+                },
+            },
+        }
+    }
+
+    fn poke(e: *Eeprom, addr: u6, value: u16) void {
+        if (!e.writable) return;
+        e.data[addr] = value;
+        e.dirty = true;
+    }
+
+    fn idle(e: *Eeprom) void {
+        e.shift = 0;
+        e.bits = 0;
+        e.in_data = false;
+        e.all = false;
+    }
+
+    /// The `.nv` file beside the set, big-endian so it reads the way the board
+    /// does. A short or missing file leaves the rest of the chip erased, which
+    /// is what a board whose settings menu grew a page sees on real hardware.
+    pub fn load(e: *Eeprom, bytes: []const u8) void {
+        e.* = .{};
+        for (0..@min(eeprom_words, bytes.len / 2)) |i| {
+            e.data[i] = std.mem.readInt(u16, bytes[i * 2 ..][0..2], .big);
+        }
+    }
+
+    pub fn save(e: *const Eeprom, out: *[eeprom_bytes]u8) void {
+        for (e.data, 0..) |word, i| std.mem.writeInt(u16, out[i * 2 ..][0..2], word, .big);
+    }
+};
+
 pub const Cps = struct {
     /// The battery's contents. Read-only once loaded.
     board: board.Board,
@@ -141,6 +297,8 @@ pub const Cps = struct {
     mixer: audio.Mixer = .{},
 
     inputs: Inputs = .{},
+    /// The settings a board with no DIP switches keeps instead (DESIGN.md §8.4).
+    eeprom: Eeprom = .{},
     /// Coin counters and lockouts, latched. Nothing reads them back; they exist
     /// because a game writes them and the write must land somewhere.
     coin_control: u16 = 0,
@@ -186,7 +344,9 @@ pub fn read16(c: *Cps, addr: u24) u16 {
         shared1_lo...shared1_hi => byteWide(c.sound.shared[1][(addr - shared1_lo) / 2]),
         in2_lo...in2_hi => in2(c),
         in3_lo...in3_hi => open_bus,
-        eeprom_lo...eeprom_hi => open_bus,
+        // One wire of the low byte is the EEPROM's data out; the rest of the
+        // word is nothing at all.
+        eeprom_lo...eeprom_hi => open_bus & ~@as(u16, 1) | c.eeprom.read(),
         ram_lo...ram_hi => peek(&c.ram, addr - ram_lo),
         else => open_bus,
     };
@@ -275,6 +435,9 @@ fn poke(c: *Cps, addr: u24, value: u16, mask: u16) void {
         shared0_lo...shared0_hi => pokeByteWide(&c.sound.shared[0], (addr - shared0_lo) / 2, value, mask),
         shared1_lo...shared1_hi => pokeByteWide(&c.sound.shared[1], (addr - shared1_lo) / 2, value, mask),
         coinctrl2_lo...coinctrl2_hi => merge(&c.coin_control2, value, mask),
+        // Byte-wide like the shared RAM beside it: the three EEPROM wires are
+        // on the low lane, so an even-address byte write reaches none of them.
+        eeprom_lo...eeprom_hi => if (mask & low_lane != 0) c.eeprom.write(@truncate(value)),
         ram_lo...ram_hi => pokeBytes(&c.ram, addr - ram_lo, value, mask),
         else => {},
     }
@@ -357,6 +520,98 @@ test "controls are wired to ground, so a pressed button reads as a zero" {
     // none of read as all-ones.
     try testing.expectEqual(@as(u16, 0xdeff), read16(&c, in0_lo));
     try testing.expectEqual(@as(u16, 0xffff), read16(&c, in0_lo + 2));
+}
+
+/// Clocks one bit into the EEPROM the way a driver does: set the wire, raise
+/// the clock, drop it. Chip select stays asserted throughout.
+fn eepromBit(c: *Cps, bit: u1) void {
+    const di: u16 = if (bit == 1) eeprom_di else 0;
+    write8(c, eeprom_lo + 1, @truncate(eeprom_cs | di));
+    write8(c, eeprom_lo + 1, @truncate(eeprom_cs | eeprom_clk | di));
+    write8(c, eeprom_lo + 1, @truncate(eeprom_cs | di));
+}
+
+fn eepromSend(c: *Cps, value: u32, bits: u5) void {
+    var i = bits;
+    while (i > 0) : (i -= 1) eepromBit(c, @truncate(value >> (i - 1)));
+}
+
+fn eepromSelect(c: *Cps, on: bool) void {
+    write8(c, eeprom_lo + 1, if (on) eeprom_cs else 0);
+}
+
+/// A command is a start bit, two opcode bits and six address bits.
+fn eepromCommand(c: *Cps, op: EepromOp, addr: u6) void {
+    eepromSelect(c, true);
+    eepromSend(c, 1 << 8 | @as(u32, @intFromEnum(op)) << 6 | addr, 9);
+}
+
+fn eepromRead(c: *Cps, addr: u6) !u16 {
+    eepromCommand(c, .read, addr);
+    // The chip answers with a dummy zero and then the word, MSB first.
+    try testing.expectEqual(@as(u16, 0), read16(c, eeprom_lo) & 1);
+    var word: u16 = 0;
+    for (0..16) |_| {
+        eepromBit(c, 0);
+        word = word << 1 | @as(u16, @truncate(read16(c, eeprom_lo) & 1));
+    }
+    eepromSelect(c, false);
+    return word;
+}
+
+test "the EEPROM answers the 93C46 protocol a service menu speaks" {
+    var c = bare();
+    // An erased chip, and a write refused until one is enabled.
+    try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 3));
+    eepromCommand(&c, .write, 3);
+    eepromSend(&c, 0x1234, 16);
+    eepromSelect(&c, false);
+    try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 3));
+    try testing.expect(!c.eeprom.dirty);
+
+    eepromCommand(&c, .special, @as(u6, @intFromEnum(EepromSpecial.enable)) << 4);
+    eepromSelect(&c, false);
+    eepromCommand(&c, .write, 3);
+    eepromSend(&c, 0x1234, 16);
+    eepromSelect(&c, false);
+    try testing.expectEqual(@as(u16, 0x1234), try eepromRead(&c, 3));
+    try testing.expect(c.eeprom.dirty);
+    // Its neighbours are untouched, and so is the rest of the chip.
+    try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 4));
+
+    eepromCommand(&c, .erase, 3);
+    eepromSelect(&c, false);
+    try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 3));
+
+    // Disabling holds across chip select, which is what stops a glitch from
+    // wiping the settings.
+    eepromCommand(&c, .special, @as(u6, @intFromEnum(EepromSpecial.disable)) << 4);
+    eepromSelect(&c, false);
+    eepromCommand(&c, .write, 7);
+    eepromSend(&c, 0xbeef, 16);
+    eepromSelect(&c, false);
+    try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 7));
+
+    // The idle wire reads high, and nothing but bit 0 is driven at all.
+    try testing.expectEqual(@as(u16, 0xffff), read16(&c, eeprom_lo));
+}
+
+test "the EEPROM round-trips through the file beside the set" {
+    var e = Eeprom{};
+    e.data[0] = 0x0102;
+    e.data[eeprom_words - 1] = 0xfeed;
+    var bytes: [eeprom_bytes]u8 = undefined;
+    e.save(&bytes);
+    try testing.expectEqualSlices(u8, &.{ 0x01, 0x02 }, bytes[0..2]);
+
+    var back = Eeprom{};
+    back.load(&bytes);
+    try testing.expectEqualSlices(u16, &e.data, &back.data);
+
+    // A short file fills the front and leaves the rest erased.
+    back.load(bytes[0..4]);
+    try testing.expectEqual(@as(u16, 0x0102), back.data[0]);
+    try testing.expectEqual(@as(u16, eeprom_erased), back.data[eeprom_words - 1]);
 }
 
 test "program ROM is read-only and stops where the chips do" {

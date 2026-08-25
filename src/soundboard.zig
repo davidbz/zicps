@@ -73,12 +73,19 @@ pub const SoundBoard = struct {
 
     /// ponytail: which of the two ROM views a read gets is decided by the
     /// address matching where the next instruction byte is due, because the
-    /// pinned z80 has no `z80Fetch` hook (DESIGN.md §2) and every fetch — the
-    /// opcode and its immediate bytes alike — reads at the program counter and
-    /// walks it forward. It is wrong only for a data read that lands exactly
-    /// on the next unfetched byte, inside the encrypted half of the ROM. The
-    /// hook settles it for good at the z80 tag bump, and this field goes with it.
+    /// pinned z80 has no `z80Fetch` hook (DESIGN.md §2). The custom watches the
+    /// M1 pin, and M1 is low only for an opcode byte and the prefixes ahead of
+    /// it: an instruction's immediate bytes are ordinary reads and decrypt the
+    /// other way. So the cursor carries `m1` alongside it. It is wrong only for
+    /// a data read that lands exactly on the next unfetched byte, inside the
+    /// encrypted half of the ROM. The hook settles it for good at the z80 tag
+    /// bump, and all three of these fields go with it.
     fetch: u16 = 0,
+    m1: bool = true,
+    /// Whether the prefix run so far was `dd`/`fd`, which is the one case where
+    /// a `cb` after it is *not* followed by another opcode fetch: `dd cb d op`
+    /// reads its displacement and its opcode with M1 high.
+    indexed: bool = false,
 
     pub const z80Read8 = file.z80Read8;
     pub const z80Write8 = file.z80Write8;
@@ -108,6 +115,8 @@ pub fn load(s: *SoundBoard, rom: []const u8, samples: []const u8, key: ?board.Ka
 /// the bus can tell an instruction's own bytes from the data it reads.
 pub fn step(s: *SoundBoard) void {
     s.fetch = s.cpu.pc;
+    s.m1 = true;
+    s.indexed = false;
     Core.step(&s.cpu, s);
 }
 
@@ -129,16 +138,44 @@ pub fn reset(s: *SoundBoard) void {
 
 pub fn z80Read8(s: *SoundBoard, addr: u16) u8 {
     const fetching = addr == s.fetch;
+    const as_op = fetching and s.m1;
     if (fetching) s.fetch +%= 1;
 
-    return switch (addr) {
-        fixed_lo...fixed_hi => if (fetching) s.op[addr] else s.data[addr],
+    const byte = switch (addr) {
+        fixed_lo...fixed_hi => if (as_op) s.op[addr] else s.data[addr],
         bank_lo...bank_hi => peek(s.rom, bankOffset(s.bank) + (addr - bank_lo)),
         shared0_lo...shared0_hi => s.shared[0][addr - shared0_lo],
         shared1_lo...shared1_hi => s.shared[1][addr - shared1_lo],
         qsound_status => qsound.read(&s.q),
         else => blank,
     };
+    if (as_op) nextIsOpcode(s, byte);
+    return byte;
+}
+
+/// Whether the byte after this opcode byte is another one. Only a prefix is
+/// followed by a second M1 cycle, and `cb` behind an index prefix is not: what
+/// follows there is a displacement and then an opcode the CPU reads without
+/// pulling M1 low, which is the whole reason this is not `isPrefix`.
+fn nextIsOpcode(s: *SoundBoard, byte: u8) void {
+    switch (byte) {
+        0xdd, 0xfd => {
+            s.m1 = true;
+            s.indexed = true;
+        },
+        0xcb => {
+            s.m1 = !s.indexed;
+            s.indexed = false;
+        },
+        0xed => {
+            s.m1 = true;
+            s.indexed = false;
+        },
+        else => {
+            s.m1 = false;
+            s.indexed = false;
+        },
+    }
 }
 
 pub fn z80Write8(s: *SoundBoard, addr: u16, value: u8) void {

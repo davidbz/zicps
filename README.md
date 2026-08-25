@@ -25,12 +25,35 @@ than drawing garbage.
 
 ## Status
 
-Early. The design is written ([`DESIGN.md`](DESIGN.md)); the emulator is being
-built against it, milestone by milestone. Nothing here plays a game yet.
+Early, but it runs. The design is written ([`DESIGN.md`](DESIGN.md)) and the
+emulator is being built against it, milestone by milestone: the machine, the
+video chips, the sound board, QSound and the frontend are in, and a real board's
+ROM set boots to its attract mode. Save states are next, and nobody has yet sat
+down and played one through — that sweep is a milestone of its own.
+
+## Running
+
+```
+zig build run -- path/to/your-set.zip
+```
+
+With no argument it opens on a dead channel; drop a set on the window, press
+any key for the menu, or use `Load Set`. Escape opens the menu, F1 is the
+board's test switch, 5 inserts a coin and Enter starts. Every key is rebindable
+from `Options → Keys`, and everything you change is written back to
+`zicps/config.ini` in your config directory.
 
 ## Building
 
-You'll need [Zig](https://ziglang.org/) 0.16.0.
+You'll need [Zig](https://ziglang.org/) 0.16.0. On Linux, raylib needs the
+usual X11 and GL headers:
+
+```
+sudo apt install libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev \
+                 libxcursor-dev libxi-dev libxext-dev
+```
+
+The tests need none of that — they build the emulator without a display:
 
 ```
 zig build test
@@ -51,9 +74,6 @@ first, and `zig build test` picks it up from then on:
 ./tools/fetch_qsound_reference.sh
 zig build qsound-ref
 ```
-
-Once there's a window to open, Linux will also need the usual X11/GL packages
-for [raylib](https://www.raylib.com/); that arrives with the frontend milestone.
 
 ## What it won't do
 

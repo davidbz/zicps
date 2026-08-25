@@ -12,6 +12,11 @@
             .url = "git+https://github.com/davidbz/z80#965e5c5e5f9570e3d15e13c66754bad0a78620c2",
             .hash = "z80-0.0.1-32YB2YlBAQB_Y0ZaTZFk8SywDOJGnTt-ES0He64Wjb-Q",
         },
+        .raylib = .{
+            .url = "git+https://github.com/raysan5/raylib#a55d49b754fa157a539666d772135bdb26ae9da0",
+            .hash = "raylib-6.0.0-whq8uAYyPAW1tLAXFW3-RSAAkdqivRstBPwsCqjQEbd1",
+            .lazy = true,
+        },
     },
     .paths = .{
         "build.zig",

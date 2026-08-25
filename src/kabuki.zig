@@ -105,18 +105,18 @@ pub fn decode(key: Kabuki, src: []const u8, op: []u8, data: []u8) void {
 
 const testing = std.testing;
 
-/// Cadillacs and Dinosaurs' key, as `board.zig`'s parser test uses it: a real
-/// dino_key is worth more here than an invented one, because the swap keys are
+/// A real board's key, the same one `board.zig`'s parser test uses: a key off
+/// hardware is worth more here than an invented one, because the swap keys are
 /// permutations and a made-up pair would not exercise the same paths.
-const dino_key = Kabuki{ .swap1 = 0x76543210, .swap2 = 0x24601357, .addr = 0x4343, .xor = 0x43 };
+const real_key = Kabuki{ .swap1 = 0x76543210, .swap2 = 0x24601357, .addr = 0x4343, .xor = 0x43 };
 
 test "what the custom encrypts, the custom decrypts" {
     for ([_]View{ .op, .data }) |view| {
         var addr: u16 = 0;
         while (addr < 0x8000) : (addr += 0x111) {
             for ([_]u8{ 0x00, 0x01, 0x43, 0x7f, 0x80, 0xc9, 0xff }) |plain| {
-                const cipher = encodeByte(dino_key, addr, view, plain);
-                try testing.expectEqual(plain, decodeByte(dino_key, addr, view, cipher));
+                const cipher = encodeByte(real_key, addr, view, plain);
+                try testing.expectEqual(plain, decodeByte(real_key, addr, view, cipher));
             }
         }
     }
@@ -126,19 +126,19 @@ test "the two views are two different bytes, so a test cannot pass by ignoring t
     var differ: usize = 0;
     for (0..0x100) |addr| {
         const src: u8 = @intCast(addr);
-        const a = decodeByte(dino_key, @intCast(addr), .op, src);
-        const b = decodeByte(dino_key, @intCast(addr), .data, src);
+        const a = decodeByte(real_key, @intCast(addr), .op, src);
+        const b = decodeByte(real_key, @intCast(addr), .data, src);
         if (a != b) differ += 1;
     }
     // Not every address happens to disagree; the great majority do.
     try testing.expect(differ > 0xc0);
 }
 
-test "0x00 encrypts to a byte with as many ones as the dino_key has" {
+test "0x00 encrypts to a byte with as many ones as the real_key has" {
     // The weakness the custom is known for, and a check on the bit chain: with
     // no bits set to permute, all that is left of a zero is the XOR.
-    const cipher = encodeByte(dino_key, 0x1234, .op, 0x00);
-    try testing.expectEqual(@popCount(dino_key.xor), @popCount(cipher));
+    const cipher = encodeByte(real_key, 0x1234, .op, 0x00);
+    try testing.expectEqual(@popCount(real_key.xor), @popCount(cipher));
 }
 
 test "a whole ROM decodes into two buffers" {
@@ -147,10 +147,10 @@ test "a whole ROM decodes into two buffers" {
 
     var op: [0x100]u8 = undefined;
     var data: [0x100]u8 = undefined;
-    decode(dino_key, &src, &op, &data);
+    decode(real_key, &src, &op, &data);
 
     for (src, 0..) |byte, i| {
-        try testing.expectEqual(decodeByte(dino_key, @intCast(i), .op, byte), op[i]);
-        try testing.expectEqual(decodeByte(dino_key, @intCast(i), .data, byte), data[i]);
+        try testing.expectEqual(decodeByte(real_key, @intCast(i), .op, byte), op[i]);
+        try testing.expectEqual(decodeByte(real_key, @intCast(i), .data, byte), data[i]);
     }
 }
