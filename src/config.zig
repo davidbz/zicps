@@ -16,12 +16,18 @@ pub const min_scale = 1;
 pub const max_scale = 4;
 pub const max_volume = 100;
 
+/// How the cabinet's control panel is wired. Not something the battery holds
+/// (§8.1) and not something a ROM says: it is what is bolted to the panel, so
+/// it is an option like the window scale is.
+pub const Buttons = enum { three, six };
+
 pub const Config = struct {
     scale: u8 = 3,
     fullscreen: bool = false,
     scanlines: bool = false,
     audio: bool = true,
     volume: u8 = 100,
+    buttons: Buttons = .six,
     keys: input.Bindings = input.defaults,
 
     pub fn parse(text: []const u8) Config {
@@ -47,6 +53,8 @@ pub const Config = struct {
                 cfg.audio = parseBool(val) orelse cfg.audio;
             } else if (std.mem.eql(u8, key, "volume")) {
                 cfg.volume = @min(max_volume, parseInt(u8, val) orelse cfg.volume);
+            } else if (std.mem.eql(u8, key, "buttons")) {
+                cfg.buttons = std.meta.stringToEnum(Buttons, val) orelse cfg.buttons;
             } else if (std.mem.startsWith(u8, key, "key.")) {
                 const action = std.meta.stringToEnum(input.Action, key["key.".len..]) orelse continue;
                 cfg.keys[@intFromEnum(action)] = input.keyCode(val) orelse continue;
@@ -63,6 +71,7 @@ pub const Config = struct {
         try w.print("scanlines = {}\n", .{cfg.scanlines});
         try w.print("audio = {}\n", .{cfg.audio});
         try w.print("volume = {d}\n", .{cfg.volume});
+        try w.print("buttons = {t}\n", .{cfg.buttons});
         var buf: [input.max_key_name]u8 = undefined;
         for (std.enums.values(input.Action)) |action| {
             const key = cfg.keys[@intFromEnum(action)];
@@ -84,7 +93,7 @@ fn parseBool(val: []const u8) ?bool {
 const testing = std.testing;
 
 test "a written config parses back identical" {
-    var cfg = Config{ .scale = 2, .fullscreen = true, .scanlines = true, .audio = false, .volume = 42 };
+    var cfg = Config{ .scale = 2, .fullscreen = true, .scanlines = true, .audio = false, .volume = 42, .buttons = .three };
     cfg.keys[@intFromEnum(input.Action.start1)] = 'Q';
     cfg.keys[@intFromEnum(input.Action.menu)] = 348; // unnamed: goes out as a number
 

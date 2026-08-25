@@ -193,6 +193,15 @@ const key_f8 = 297;
 const key_f11 = 300;
 const key_f12 = 301;
 
+/// The bits a cabinet's control panel is wired for. A three-button panel has
+/// no 4, 5 or 6 bolted to it, so the machine is never handed those however the
+/// keyboard is bound — and the shell draws them as holes that never light.
+pub fn wiring(six: bool) u16 {
+    const all = (@as(u16, 1) << cps.button_count) - 1;
+    if (six) return all;
+    return all & ~(cps.Button.b4.mask() | cps.Button.b5.mask() | cps.Button.b6.mask());
+}
+
 /// Player `pad`'s buttons for this frame. `down` is the host's keyboard, which
 /// is raylib's `IsKeyDown` and nothing else — passing it in is what keeps the
 /// window out of this file.
@@ -319,6 +328,15 @@ test "bindings turn held keys into what the machine is handed" {
     b[@intFromEnum(Action.p2_b1)] = 'K';
     try testing.expectEqual(cps.Button.b1.mask(), buttons(b, 1, &held));
     try testing.expectEqual(p1, buttons(b, 0, &held));
+
+    // A three-button panel cannot hand over the buttons it has no holes for,
+    // and hands over everything it does.
+    b[@intFromEnum(Action.p1_b6)] = 'A';
+    try testing.expectEqual(p1 | cps.Button.b6.mask(), buttons(b, 0, &held) & wiring(true));
+    try testing.expectEqual(p1, buttons(b, 0, &held) & wiring(false));
+    for ([_]cps.Button{ .up, .down, .left, .right, .b1, .b2, .b3 }) |btn| {
+        try testing.expectEqual(btn.mask(), btn.mask() & wiring(false));
+    }
 }
 
 test "every key name round-trips, and fits the buffer they are written to" {

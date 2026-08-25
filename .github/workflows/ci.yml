@@ -47,16 +47,14 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: ${{ matrix.zig }}
-      # raylib comes in with the frontend in M5. Until it is in the manifest
-      # there is nothing to install headers for; restore this step with it,
-      # since raylib links against X11/GL on Linux and the macOS and Windows
-      # runners already ship what it needs:
-      #   - name: Install raylib build dependencies
-      #     if: runner.os == 'Linux'
-      #     run: |
-      #       sudo apt-get update
-      #       sudo apt-get install -y libgl1-mesa-dev libx11-dev libxrandr-dev \
-      #         libxinerama-dev libxcursor-dev libxi-dev libasound2-dev
+      # raylib links against X11 and GL on Linux; the macOS and Windows runners
+      # already ship what it needs.
+      - name: Install raylib build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxi-dev libasound2-dev
       # Cache the Zig build cache to speed up incremental builds.
       # Key includes the zon hash so a dep change busts it correctly.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6

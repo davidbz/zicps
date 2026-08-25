@@ -56,8 +56,8 @@ z80 repo, is gated by that repo's conformance corpus, and arrives here as a tag
 bump. zigesis is unaffected.
 
 It has not landed yet. M3 shipped without it, on a fetch cursor that infers the
-same thing from the address a read arrives at (§9, M3's ceilings); the hook is
-still what settles it.
+same thing from the address a read arrives at and the M1 pin's own rule (§9,
+M3's ceilings); the hook is still what settles it.
 
 ## 3. Architecture
 
@@ -239,9 +239,13 @@ One window, simple design, no toolbar clutter. Three states, as in zigesis:
 The root page's right half is the **board card**, the counterpart of zigesis's
 cartridge card: what the set contains (how many program, graphics and sample
 ROMs, and how large), what the board file says the board was configured as, and
-whether the program ROM's own checksum matches what is in the header. Nothing
-here is looked up anywhere — every reading comes out of the files the user
-supplied, which is also why this emulator ships no database and names nothing.
+and a checksum over the program ROM (M5 correction: said "whether the program
+ROM's own checksum matches what is in the header", and there is no such header —
+a CPS-1 program image starts at its 68000 reset vectors and carries no checksum
+field, so the card shows a sum it computes itself, as a reading with nothing to
+compare it against rather than a verdict). Nothing here is looked up anywhere —
+every reading comes out of the files the user supplied, which is also why this
+emulator ships no database and names nothing.
 
 Under all three states sits the status bar, sized into the window rather than
 overlaid, carrying the control panel, the set's name, and on the right the
@@ -531,8 +535,8 @@ What M0 deliberately does not do, and where each is picked up:
   more; `0xf00000` reads back the audio ROM, the shared RAM windows are plain
   memory, and no one is on the other side of them until M3. Kabuki decryption
   is M3's, QSound is M4's, and `--hash` gains an audio hash with them.
-- **No EEPROM.** `0xf1c006` floats; §8.4's serial protocol arrives with save
-  states at M6.
+- **No EEPROM.** `0xf1c006` floats; §8.4's serial protocol arrives with the
+  sidecar at M5 (M5 correction: said M6, with save states).
 - **Coin counters and lockouts latch and do nothing.** They are written by
   games and the write has to land somewhere.
 - **No `--record`.** A replay log is a file of one 32-bit word a frame, which
@@ -677,9 +681,14 @@ What M3 deliberately does not do, and where each is picked up:
   that a read is an opcode fetch, so which of the two Kabuki views a read gets
   is decided by a cursor: the address the next instruction byte is due at, put
   back on the program counter before every instruction and walked forward by
-  each byte the instruction fetches. It is wrong only for a data read that
-  lands exactly on the next unfetched byte inside the encrypted half, which a
-  driver has no reason to do. The hook is still owed upstream, and the cursor
+  each byte the instruction fetches. What the custom actually watches is M1,
+  which is low for an opcode byte and the prefixes ahead of it and high for
+  everything else, so the cursor carries M1 alongside it and decodes prefixes to
+  know where the next opcode is due (M5 correction: M3 gave the opcode view to
+  every byte read at the cursor, immediates included, which no real driver
+  survives — see M5's ceilings). It is wrong only for a data read that lands
+  exactly on the next unfetched byte inside the encrypted half, which a driver
+  has no reason to do. The hook is still owed upstream, and the cursor
   goes with the tag bump.
 - **The DSP is a stub that logs.** Register writes land in the file and in a
   32-entry window on the driver; `qsound.sample` returns silence. The rate, the
@@ -785,6 +794,63 @@ Acceptance: every required item in §5.1 except save states is reachable from th
 menu, works, and survives a restart through the config file; the board's own
 service menu can be entered and its settings persist across runs; the idle
 window costs negligible CPU.
+
+**Ceilings left behind.** Corrections to this document, made where they belong.
+§5.2's board card cannot check the program ROM against its header, because a
+CPS-1 program image has no header. M0's own ceilings above hand the EEPROM to
+this milestone rather than to save states at M6, because M5's deliverables name
+the sidecar and a board whose service menu forgets everything on exit fails M5's
+acceptance, not M6's. And M3's fetch cursor was wrong: it gave the opcode view
+to every byte read at the cursor, immediates included, where the custom watches
+M1 and M1 is low only for an opcode byte and the prefixes ahead of it. Nothing
+in the test suite caught it, because the test ROM was encrypted the same wrong
+way; the first real set caught it in one instruction, a `ld sp,$ffff` that came
+out as `ld sp,$db50` and put the stack in unmapped space, so the sound board
+never wrote the byte the 68000 waits on and the machine hung with the screen
+black. The fixture now encrypts the way a board does, and M3's ceiling above
+says what the cursor carries.
+
+The idle window's cost, measured under Xvfb with llvmpipe — software
+rasterisation, the worst case a desktop can present: 33% of one core at 3x.
+What that number is made of is the useful part. At 60 Hz the same window costs
+59%, and at 1x it costs 19%, so it is the stretch that costs, not the snow:
+generating 160 × 120 bytes of static is the constant term and it is small. The
+snow therefore runs at half the frame rate of everything else (`snow_fps`),
+which is free — a dead channel does not look any deader at 60. Any machine with
+a GPU pays a fraction of this.
+
+What M5 deliberately does not do, and where each is picked up:
+
+- **No save states**, which is why the root menu has five rows and not seven.
+  M6 adds them, and the status bar's quicksave age with them: the bar already
+  reserves nothing for it, so that field arrives as a field.
+- **A rebinding that collides is shown, not refused.** The keys page draws a
+  conflicting row in the bad tone (`input.conflicts`), and then lets it stand.
+  Refusing it would need somewhere to put the key that was displaced, and there
+  is nowhere: the honest answer is to show the user the collision they made.
+- **Escape is not bindable.** It is the way out of every page, including the
+  rebinding prompt, which is the only reason the prompt can be cancelled at all.
+- **The control panel lights player 1 only.** Player 2's buttons are bound, read
+  and handed to the machine; there is simply one panel drawn, because a second
+  one doubles the width of the bar's left half to show a second player who is
+  usually not there.
+- **No gamepad.** §5.1 asks for configurable key bindings and this binds keys.
+  A pad would need its own binding page and its own axis-to-direction rules,
+  and neither is in scope.
+- **Fullscreen is borderless at the desktop's resolution**, so the picture
+  stretches to whatever that is and the integer scale option does not apply
+  while it is on. The scale is remembered and comes back with the window.
+- **The browser lists directories and `.zip`, and nothing else.** It is not a
+  file manager: there is no typing a path into it, no favourites, and no recent
+  sets — §5.1 files that last one under nice-to-have and M7 can have it.
+- **Per-channel audio muting is not on the menu.** The mixer has the control
+  from M4 and the audio page does not expose it; it is a debugging knob, and
+  §6.3's audio scope at M8 is where it belongs.
+- **The service-menu half of the acceptance is unverified here.** The EEPROM's
+  protocol and its sidecar have unit tests and a round trip, and a real QSound
+  set now boots to its attract mode in the window, but nothing has yet sat in
+  that board's own service menu and found its settings still there after a
+  restart — §10's test ROM has no menu to enter. The rest is M7's sweep.
 
 ### M6: Save states
 

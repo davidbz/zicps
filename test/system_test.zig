@@ -983,16 +983,47 @@ fn soundDriver() [z80_bytes]u8 {
     return rom;
 }
 
-/// The same driver as the sound board's ROM: code encrypted for the opcode
-/// view, the pitch table for the data view. One byte cannot be both, which is
-/// exactly the point — a machine that fetched the table or read the code would
-/// come apart immediately.
+/// How many bytes follow an opcode, for the handful of opcodes the driver
+/// above is written out of. Anything it grows has to be listed here.
+fn operandBytes(op: u8) usize {
+    return switch (op) {
+        0x00, 0x23, 0x3c, 0x47, 0x56, 0x5e, 0x6f, 0x78, 0x7a, 0x7b, 0x87, 0xaf, 0xb7, 0xf1, 0xf5, 0xfb => 0,
+        0x26, 0x28, 0x3e, 0xe6 => 1,
+        0x31, 0x32, 0x3a, 0xc3 => 2,
+        else => unreachable,
+    };
+}
+
+/// The same driver as the sound board's ROM: every byte an M1 cycle fetches
+/// encrypted for the opcode view, and everything else — an instruction's own
+/// immediates as much as the pitch table — for the data view. One byte cannot
+/// be both, which is exactly the point: a machine that fetched the table, or
+/// read an operand as though the custom had held M1 low for it, would come
+/// apart immediately.
+///
+/// Which bytes those are is not in the ROM, so the code is walked instruction
+/// by instruction to find them. Straight-line code with `nop` between the
+/// blocks, so walking it from the reset vector is enough.
 fn encryptedDriver(key: board.Kabuki) [z80_bytes]u8 {
     const plain = soundDriver();
+
+    var is_op: [z80_bytes]bool = @splat(false);
+    var at: usize = 0;
+    while (at < z80_table) {
+        is_op[at] = true;
+        const op = plain[at];
+        at += 1;
+        if (op == 0xed) { // the one prefix here, and both of its opcodes are bare
+            is_op[at] = true;
+            at += 1;
+        } else {
+            at += operandBytes(op);
+        }
+    }
+
     var rom: [z80_bytes]u8 = undefined;
-    for (&rom, plain, 0..) |*byte, v, i| {
-        const table = i >= z80_table and i < z80_table + pitch_table.len * 2;
-        byte.* = kabuki.encodeByte(key, @intCast(i), if (table) .data else .op, v);
+    for (&rom, plain, is_op, 0..) |*byte, v, m1, i| {
+        byte.* = kabuki.encodeByte(key, @intCast(i), if (m1) .op else .data, v);
     }
     return rom;
 }

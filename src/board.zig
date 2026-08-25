@@ -407,10 +407,10 @@ fn int(comptime T: type, vals: *Tokens, key: []const u8, line_no: u32, diag: *Di
 
 const testing = std.testing;
 
-/// Cadillacs and Dinosaurs, transcribed from its MAME entry: CPS_B_21_QS3,
-/// mapper CD63B, a dino_decode key and the ROM set's own load lines. Committed
-/// here as a *test fixture* for the parser, not as a database: no code reads it
-/// and no game name reaches the emulator.
+/// One real board, transcribed from published research: a QSound B-board's
+/// register mapping, its mapper's bank table, a Kabuki key and that set's own
+/// load lines. Committed here as a *test fixture* for the parser, not as a
+/// database: no code reads it and no game name reaches the emulator.
 const example =
     \\version = 1
     \\
