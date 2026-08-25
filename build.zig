@@ -33,6 +33,41 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "board", .module = board }},
     });
 
+    const audio = b.addModule("audio", .{
+        .root_source_file = b.path("src/audio.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const kabuki = b.addModule("kabuki", .{
+        .root_source_file = b.path("src/kabuki.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "board", .module = board }},
+    });
+
+    const qsound = b.addModule("qsound", .{
+        .root_source_file = b.path("src/qsound.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "audio", .module = audio }},
+    });
+
+    // The sound board: its own Z80, its own view of its own ROM, its own chip.
+    // The 68000 side reaches it through shared RAM and nothing else, which is
+    // what the hardware does too.
+    const soundboard = b.addModule("soundboard", .{
+        .root_source_file = b.path("src/soundboard.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "kabuki", .module = kabuki },
+            .{ .name = "qsound", .module = qsound },
+            .{ .name = "z80", .module = z80.module("z80") },
+        },
+    });
+
     const cps = b.addModule("cps", .{
         .root_source_file = b.path("src/cps.zig"),
         .target = target,
@@ -41,6 +76,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "board", .module = board },
             .{ .name = "romset", .module = romset },
             .{ .name = "video", .module = video },
+            .{ .name = "audio", .module = audio },
+            .{ .name = "soundboard", .module = soundboard },
         },
     });
 
@@ -52,6 +89,9 @@ pub fn build(b: *std.Build) void {
             .{ .name = "m68k", .module = z68k.module("m68k") },
             .{ .name = "cps", .module = cps },
             .{ .name = "video", .module = video },
+            .{ .name = "audio", .module = audio },
+            .{ .name = "soundboard", .module = soundboard },
+            .{ .name = "qsound", .module = qsound },
         },
     });
 
@@ -69,21 +109,11 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "input", .module = input }},
     });
 
-    const audio = b.addModule("audio", .{
-        .root_source_file = b.path("src/audio.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     const snow = b.addModule("snow", .{
         .root_source_file = b.path("src/ui/snow.zig"),
         .target = target,
         .optimize = optimize,
     });
-
-    // The sound board's Z80 arrives with M3. It is wired now so that the
-    // dependency is real rather than a line in a manifest nothing reads.
-    _ = z80;
 
     // --- the program ---------------------------------------------------------
     const exe_module = b.createModule(.{
@@ -96,6 +126,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "cps", .module = cps },
             .{ .name = "scheduler", .module = scheduler },
             .{ .name = "video", .module = video },
+            .{ .name = "audio", .module = audio },
             .{ .name = "input", .module = input },
             .{ .name = "config", .module = config },
         },
@@ -126,6 +157,10 @@ pub fn build(b: *std.Build) void {
             .{ .name = "cps", .module = cps },
             .{ .name = "video", .module = video },
             .{ .name = "scheduler", .module = scheduler },
+            .{ .name = "kabuki", .module = kabuki },
+            .{ .name = "soundboard", .module = soundboard },
+            .{ .name = "qsound", .module = qsound },
+            .{ .name = "audio", .module = audio },
         },
     });
 
@@ -138,7 +173,8 @@ pub fn build(b: *std.Build) void {
     testrom_step.dependOn(&b.addRunArtifact(scoreboard).step);
 
     const modules = [_]*std.Build.Module{
-        board, romset, video, cps, scheduler, input, config, audio, snow, exe_module, system_tests,
+        board, romset, video,  cps,        scheduler, input,      config,
+        audio, kabuki, qsound, soundboard, snow,      exe_module, system_tests,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });

@@ -55,6 +55,10 @@ same `bus.z80Read8` as data. The fix is an optional `z80Fetch` on the bus,
 z80 repo, is gated by that repo's conformance corpus, and arrives here as a tag
 bump. zigesis is unaffected.
 
+It has not landed yet. M3 shipped without it, on a fetch cursor that infers the
+same thing from the address a read arrives at (§9, M3's ceilings); the hook is
+still what settles it.
+
 ## 3. Architecture
 
 ### 3.1 Repository layout
@@ -651,6 +655,50 @@ Acceptance: a sound driver executes under trace and issues QSound register
 writes in a sane order; the pipeline is proven end to end with a synthetic
 source, including the measured image floor; the machine keeps running at the
 right speed with audio pacing it.
+
+**Ceilings left behind.** The measurement §6.2 asks for, first, because it
+changed the filter: raising 24.038 kHz to 48 kHz leaves a floor 55 dB under a
+3 kHz tone, and what is left at that floor is not the image but the spurs a
+quantised fractional delay puts either side of the tone — the image itself is
+below them. Coming down, 32 filter phases were enough, because the bank is
+walked once every 4.66 input samples; going up it is walked on every output
+frame, and 32 phases measured -48 dB. Each doubling buys 6 dB (64: -49 dB, 128:
+-55 dB, 256: -61 dB) until the taps' own stopband takes over, so the bank is 128
+phases now and 33 KB of table. The mixer also lost the second source it
+inherited from zigesis: a QSound board has one sound chip, and summing two was
+code with nothing to sum.
+
+What M3 deliberately does not do, and where each is picked up:
+
+- **There is no `z80Fetch` hook.** The pinned z80 has no way to tell the bus
+  that a read is an opcode fetch, so which of the two Kabuki views a read gets
+  is decided by a cursor: the address the next instruction byte is due at, put
+  back on the program counter before every instruction and walked forward by
+  each byte the instruction fetches. It is wrong only for a data read that
+  lands exactly on the next unfetched byte inside the encrypted half, which a
+  driver has no reason to do. The hook is still owed upstream, and the cursor
+  goes with the tag bump.
+- **The DSP is a stub that logs.** Register writes land in the file and in a
+  32-entry window on the driver; `qsound.sample` returns silence. The rate, the
+  debt that produces it, the resampler and the ring are real, so M4 replaces one
+  function and nothing else.
+- **The chip is sampled after the Z80 has had the whole line**, rather than in
+  step with it, so a register written mid-line takes effect from that line's
+  first sample: 16 samples of slack at 24 kHz on where a note starts.
+- **The two CPUs meet only in shared RAM, a line at a time.** The 68000 has its
+  line and then the Z80 has its own, so a posted command is read one line later
+  at worst. Nothing on the board makes the two CPUs meet anywhere else.
+- **A set with no sound ROM has no sound board at all.** The in-repo test ROM is
+  one: rather than let a Z80 fetch 0xff out of empty space and spend the run
+  taking RST 38, the sound board is skipped when its region is empty.
+- **Audio pacing is measured, not felt.** With no window there is no device to
+  pace against, so what the headless runner proves is that a frame produces
+  48000/59.6374 output frames and that the ring is drained every frame. The
+  device's own clock becomes the pace at M5, and that is where a fill-level
+  policy belongs.
+- **Nothing resets or halts the sound board from the main board.** The Z80 comes
+  up with the machine and runs until it stops; a game that expects to hold it in
+  reset would not notice, because there is nothing yet for it to hear.
 
 ### M4: QSound
 

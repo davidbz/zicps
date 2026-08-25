@@ -10,6 +10,8 @@ const std = @import("std");
 const board = @import("board");
 const romset = @import("romset");
 const video = @import("video");
+const audio = @import("audio");
+const soundboard = @import("soundboard");
 
 /// This file, so that `Cps` can hand the 68000 core the bus entry points it
 /// calls by method while the functions themselves stay free (DESIGN.md §3.2).
@@ -59,7 +61,7 @@ pub const ram_hi = 0xffffff;
 pub const ram_bytes = 0x10000;
 /// Each shared RAM window is one byte per 68000 *word* address, so it is half
 /// as many bytes as it is addresses — and the same 4 KiB the Z80 sees.
-pub const shared_bytes = 0x1000;
+pub const shared_bytes = soundboard.shared_bytes;
 
 /// One player's controls, active high. Bit order is the board's own: the four
 /// directions in the order the wiring reads them, then six buttons.
@@ -125,7 +127,11 @@ pub const Cps = struct {
 
     v: video.Video = .{},
     ram: [ram_bytes]u8 = @splat(0),
-    shared: [2][shared_bytes]u8 = @splat(@splat(0)),
+    /// The sound board is a board: its own CPU, its own ROM, its own RAM. The
+    /// two shared windows below live on it, because that is the chip they are.
+    sound: soundboard.SoundBoard = .{},
+    /// Where the resampled result piles up until `main.zig` drains it.
+    mixer: audio.Mixer = .{},
 
     inputs: Inputs = .{},
     /// Coin counters and lockouts, latched. Nothing reads them back; they exist
@@ -138,8 +144,15 @@ pub const Cps = struct {
     ref: u64 = 0,
     frame: u64 = 0,
     line: u32 = 0,
-    /// Cycles the last line's final instruction ran past its budget.
+    /// Cycles the last line's final instruction ran past its budget, one per
+    /// CPU: neither core stops on a cycle boundary, so what it overran is owed
+    /// to the next line rather than forgiven.
     cpu_over: u64 = 0,
+    sound_over: u64 = 0,
+    /// Reference ticks owed to the Z80's periodic interrupt and to the QSound
+    /// chip's sample clock, carried the same way the CPUs carry cycles.
+    sound_irq_debt: u64 = 0,
+    sample_debt: u64 = 0,
 
     // The 68000 core reaches its bus by method call. The functions stay free.
     pub const read8 = file.read8;
@@ -162,8 +175,8 @@ pub fn read16(c: *Cps, addr: u24) u16 {
         // protection read on the boards that use it, harmless on those that
         // do not.
         audio_peek_lo...audio_peek_hi => byteWide(peekByte(c.rom.qsound, (addr - audio_peek_lo) / 2)),
-        shared0_lo...shared0_hi => byteWide(c.shared[0][(addr - shared0_lo) / 2]),
-        shared1_lo...shared1_hi => byteWide(c.shared[1][(addr - shared1_lo) / 2]),
+        shared0_lo...shared0_hi => byteWide(c.sound.shared[0][(addr - shared0_lo) / 2]),
+        shared1_lo...shared1_hi => byteWide(c.sound.shared[1][(addr - shared1_lo) / 2]),
         in2_lo...in2_hi => in2(c),
         in3_lo...in3_hi => open_bus,
         eeprom_lo...eeprom_hi => open_bus,
@@ -252,8 +265,8 @@ fn poke(c: *Cps, addr: u24, value: u16, mask: u16) void {
         gfxram_lo...gfxram_hi => pokeBytes(&c.v.gfxram, addr - gfxram_lo, value, mask),
         // Byte-wide, and only the low lane is wired, so an even-address byte
         // write reaches nothing at all.
-        shared0_lo...shared0_hi => pokeByteWide(&c.shared[0], (addr - shared0_lo) / 2, value, mask),
-        shared1_lo...shared1_hi => pokeByteWide(&c.shared[1], (addr - shared1_lo) / 2, value, mask),
+        shared0_lo...shared0_hi => pokeByteWide(&c.sound.shared[0], (addr - shared0_lo) / 2, value, mask),
+        shared1_lo...shared1_hi => pokeByteWide(&c.sound.shared[1], (addr - shared1_lo) / 2, value, mask),
         coinctrl2_lo...coinctrl2_hi => merge(&c.coin_control2, value, mask),
         ram_lo...ram_hi => pokeBytes(&c.ram, addr - ram_lo, value, mask),
         else => {},
@@ -306,16 +319,16 @@ test "shared RAM is one byte per word address, on the low half of the bus" {
     write16(&c, shared0_lo + 2, 0x5678);
     try testing.expectEqual(@as(u16, 0xff34), read16(&c, shared0_lo));
     try testing.expectEqual(@as(u8, 0x78), read8(&c, shared0_lo + 3));
-    try testing.expectEqualSlices(u8, &.{ 0x34, 0x78 }, c.shared[0][0..2]);
+    try testing.expectEqualSlices(u8, &.{ 0x34, 0x78 }, c.sound.shared[0][0..2]);
 
     // The high half is not wired, so writing it changes nothing.
     write8(&c, shared0_lo, 0xaa);
-    try testing.expectEqual(@as(u8, 0x34), c.shared[0][0]);
+    try testing.expectEqual(@as(u8, 0x34), c.sound.shared[0][0]);
 
     // The two windows cover the Z80's 4 KiB each, and do not overlap.
     write16(&c, shared1_lo, 0x0099);
-    try testing.expectEqual(@as(u8, 0x34), c.shared[0][0]);
-    try testing.expectEqual(@as(u8, 0x99), c.shared[1][0]);
+    try testing.expectEqual(@as(u8, 0x34), c.sound.shared[0][0]);
+    try testing.expectEqual(@as(u8, 0x99), c.sound.shared[1][0]);
 }
 
 test "controls are wired to ground, so a pressed button reads as a zero" {

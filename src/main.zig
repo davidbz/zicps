@@ -13,6 +13,7 @@ const romset = @import("romset");
 const cps = @import("cps");
 const scheduler = @import("scheduler");
 const video = @import("video");
+const audio = @import("audio");
 const input = @import("input");
 const config = @import("config");
 
@@ -163,13 +164,15 @@ fn headless(
     } else null;
     defer if (replay) |r| gpa.free(r.log);
 
+    var sound = Sound{};
     var frame: u32 = 0;
     while (frame < n and !cpu.halted) : (frame += 1) {
         if (replay) |r| c.inputs = r.at(frame);
         scheduler.runFrame(c, cpu);
-        if (every_frame) report(c, cpu, frame + 1);
+        sound.drain(&c.mixer);
+        if (every_frame) report(c, cpu, &sound, frame + 1);
     }
-    if (!every_frame) report(c, cpu, frame);
+    if (!every_frame) report(c, cpu, &sound, frame);
 
     if (cpu.halted) {
         std.debug.print("the 68000 halted at pc={x:0>6} sr={x:0>4} after {d} frames\n", .{ cpu.pc, @as(u16, @bitCast(cpu.sr)), frame });
@@ -177,8 +180,31 @@ fn headless(
     }
 }
 
-fn report(c: *const cps.Cps, cpu: *const scheduler.Cpu, frame: u32) void {
-    std.debug.print("frame {d} hash={x:0>16}\n", .{ frame, scheduler.hash(c, cpu) });
+/// The sound that came out, hashed as it goes past. With no window there is no
+/// device to pace against, so the sample count is what says the machine ran at
+/// the right speed: a frame is worth 48000/59.6374 of them and nothing else.
+///
+/// Draining is not optional even when nobody is listening. The ring is finite,
+/// and a run that never emptied it would quietly start dropping frames a fifth
+/// of a second in, which is a different machine from the one being tested.
+const Sound = struct {
+    h: std.hash.Wyhash = .init(0),
+    frames: u64 = 0,
+
+    fn drain(s: *Sound, m: *audio.Mixer) void {
+        while (m.pop()) |f| : (s.frames += 1) s.h.update(std.mem.asBytes(&f));
+    }
+};
+
+fn report(c: *const cps.Cps, cpu: *const scheduler.Cpu, sound: *const Sound, frame: u32) void {
+    // A copy, because finishing the hash consumes it and the run goes on.
+    var h = sound.h;
+    std.debug.print("frame {d} hash={x:0>16} audio={x:0>16} samples={d}\n", .{
+        frame,
+        scheduler.hash(c, cpu),
+        h.final(),
+        sound.frames,
+    });
 }
 
 /// `sets/dino.zip`, `sets/dino` and the `sets/dino/` a shell completes a

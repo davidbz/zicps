@@ -11,6 +11,9 @@ const romset = @import("romset");
 const cps = @import("cps");
 const video = @import("video");
 const scheduler = @import("scheduler");
+const kabuki = @import("kabuki");
+const qsound = @import("qsound");
+const audio = @import("audio");
 
 const testing = std.testing;
 
@@ -721,20 +724,24 @@ test "the test ROM draws its three tilemaps" {
 /// came out of each palette page, and the hash of the machine that drew it.
 /// The scoreboard fails on a move in either direction — a layer that stopped
 /// drawing and a layer that started covering the others are the same bug.
+///
+/// The hashes moved at M3 and the scores did not, which is the whole story of
+/// that milestone from the picture's side: `scheduler.hash` took the sound
+/// board in, and nothing draws differently for it.
 const Pin = struct {
     scores: [video.palette_pages]u32,
     hash: u64,
 };
 
 const pinned = [page_count]Pin{
-    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0xa1ba1ce80fdea3b5 },
-    .{ .scores = .{ 1680, 783, 1984, 6358, 0, 0 }, .hash = 0x0b4794d3aac4de77 },
-    .{ .scores = .{ 1616, 783, 2048, 6358, 0, 0 }, .hash = 0x1a5b6a697ab5abfb },
-    .{ .scores = .{ 1680, 783, 0, 8217, 0, 0 }, .hash = 0xfe76b153fcd62961 },
-    .{ .scores = .{ 0, 783, 1488, 8176, 0, 0 }, .hash = 0xaf1996147408ccc3 },
-    .{ .scores = .{ 0, 0, 0, 0, 168, 168 }, .hash = 0x5414d109c56e8b2e },
-    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0xcc5be77cc0917442 },
-    .{ .scores = .{ 0, 783, 2208, 6042, 0, 0 }, .hash = 0x20d7b22651c2f20c },
+    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0xae890c22ef81e4e1 },
+    .{ .scores = .{ 1680, 783, 1984, 6358, 0, 0 }, .hash = 0x0791feb5e34e0fb3 },
+    .{ .scores = .{ 1616, 783, 2048, 6358, 0, 0 }, .hash = 0xc442d177de5cf455 },
+    .{ .scores = .{ 1680, 783, 0, 8217, 0, 0 }, .hash = 0xd65981cb0f5cb0d5 },
+    .{ .scores = .{ 0, 783, 1488, 8176, 0, 0 }, .hash = 0xd28df4bad525dd8d },
+    .{ .scores = .{ 0, 0, 0, 0, 168, 168 }, .hash = 0x0decf3c1532baa9a },
+    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0xb16e2a702f6438e3 },
+    .{ .scores = .{ 0, 783, 2208, 6042, 0, 0 }, .hash = 0x36e165c3a9294177 },
 };
 
 test "scoreboard: every page of the test ROM draws what it drew" {
@@ -781,4 +788,316 @@ test "scoreboard: every page of the test ROM draws what it drew" {
     // no priority pen of its own.
     try testing.expect(table[@intFromEnum(Page.sprites)].scores[0] > 0);
     try testing.expect(table[@intFromEnum(Page.priority)].scores[0] < table[@intFromEnum(Page.sprites)].scores[0]);
+}
+
+// ------------------------------------------------- M3: the sound board
+
+// Everything below is the M3 acceptance (DESIGN.md §9): a sound driver, in a
+// ROM this test encrypts itself, running on the Z80 behind the Kabuki custom;
+// the 68000 handing it commands through shared RAM; QSound register writes in
+// the order a driver makes them; and the audio pipeline turning the chip's
+// rate into output frames at the rate the machine runs at.
+
+/// The 68000's half of the handshake. It posts the pad word as a sound command
+/// when it changes, and not before the sound board has taken the last one —
+/// which is what the games do, and what makes the register log one burst per
+/// command instead of a burst per line.
+///
+///     loop: move.w ($800000).l, d0   ; the controls
+///           not.w  d0                ; a wire to ground reads as a zero
+///           cmp.w  d1, d0            ; same as last time?
+///           beq.b  loop
+///           tst.b  ($f18001).l       ; has the Z80 taken the last one?
+///           bne.b  loop
+///           move.w d0, ($f18000).l   ; post it
+///           move.w d0, d1
+///           bra.b  loop
+const sound_program = [_]u16{
+    0x3039, 0x0080, 0x0000,
+    0x4640, 0xb041, 0x67f4,
+    0x4a39, 0x00f1, 0x8001,
+    0x66ec, 0x33c0, 0x00f1,
+    0x8000, 0x3200, 0x60e2,
+};
+
+/// Where the sound driver keeps things. The reset stub has to fit under the
+/// interrupt vector at 0x38, and the pitch table is page-aligned so that
+/// indexing it is one `ld l,a`.
+const z80_irq = 0x38;
+const z80_main = 0x50;
+const z80_table = 0x100;
+const z80_bytes = 0x8000;
+
+/// The tick counter the interrupt handler keeps, and the command byte, in the
+/// two shared windows.
+const z80_ticks = 0xf000;
+const z80_command = 0xc000;
+
+/// The registers the driver sets up, in the order it sets them: a channel is
+/// pointed at its sample before it is given a pitch, and given a volume last,
+/// because a channel that is loud before it is pointed anywhere plays whatever
+/// the last one left behind.
+const qs_bank = 0x00;
+const qs_start = 0x01;
+const qs_pitch = 0x02;
+const qs_volume = 0x06;
+const qs_bank_value = 0x8000;
+const qs_volume_value = 0x1000;
+
+/// Two bytes per command, big end first, read through the *data* view of the
+/// encrypted ROM — so a driver that fetched them as opcodes would get other
+/// numbers entirely.
+const pitch_table = [_]u16{ 0x0000, 0x1234, 0x2345, 0x3456 };
+
+/// The driver, hand-assembled. It is a real one in miniature: wait for a
+/// command, acknowledge it, wait for the chip, look the note up, set the
+/// channel up register by register, and count the 250 Hz interrupt on the side.
+fn soundDriver() [z80_bytes]u8 {
+    var rom: [z80_bytes]u8 = @splat(0);
+
+    // Reset: stack at the top of RAM, mode 1 interrupts, the tick counter
+    // clear. The command mailbox is deliberately *not* cleared: the 68000 has
+    // already had its line by the time the Z80 boots, and a driver that wiped
+    // the mailbox on the way up would lose the first command of the run.
+    const boot = [_]u8{
+        0x31, 0x00, 0x00, // ld sp,0x0000  (the first push lands at the top of RAM)
+        0xed, 0x56, // im 1
+        0xaf, // xor a
+        0x32, z80_ticks & 0xff, z80_ticks >> 8, // ld (ticks),a
+        0xfb, // ei
+        0xc3, z80_main, 0x00, // jp main
+    };
+    @memcpy(rom[0..boot.len], &boot);
+
+    // The 250 Hz interrupt, counted where the 68000 can see the count.
+    const irq = [_]u8{
+        0xf5, // push af
+        0x3a, z80_ticks & 0xff, z80_ticks >> 8, // ld a,(ticks)
+        0x3c, // inc a
+        0x32, z80_ticks & 0xff, z80_ticks >> 8, // ld (ticks),a
+        0xf1, // pop af
+        0xfb, // ei
+        0xed, 0x4d, // reti
+    };
+    @memcpy(rom[z80_irq..][0..irq.len], &irq);
+
+    const main = [_]u8{
+        // poll: a command of zero is no command at all.
+        0x3a, z80_command & 0xff, z80_command >> 8, // ld a,(command)
+        0xb7, // or a
+        0x28, 0xfa, // jr z,poll
+        0x47, // ld b,a
+        0xaf, // xor a
+        0x32, z80_command & 0xff, z80_command >> 8, // ld (command),a   ; acknowledge
+        // ready: spin on the chip's status bit, as a driver does.
+        0x3a, 0x07, 0xd0, // ld a,(0xd007)
+        0xe6, 0x80, // and 0x80
+        0x28, 0xf9, // jr z,ready
+        // The pitch, out of the table: a data read of the encrypted ROM.
+        0x78, // ld a,b
+        0x87, // add a,a
+        0x26, z80_table >> 8, // ld h,>table
+        0x6f, // ld l,a
+        0x56, // ld d,(hl)
+        0x23, // inc hl
+        0x5e, // ld e,(hl)
+        // bank
+        0x3e, qs_bank_value >> 8, // ld a,0x80
+        0x32, 0x00, 0xd0, // ld (data hi),a
+        0xaf, // xor a
+        0x32, 0x01, 0xd0, // ld (data lo),a
+        0x32, 0x02, 0xd0, // ld (register),a  ; a is 0: register 0
+        // start: the command number itself, so the test can see which one arrived
+        0xaf, // xor a
+        0x32,
+        0x00,
+        0xd0,
+        0x78, // ld a,b
+        0x32,
+        0x01,
+        0xd0,
+        0x3e,
+        qs_start,
+        0x32,
+        0x02,
+        0xd0,
+        // pitch
+        0x7a, // ld a,d
+        0x32,
+        0x00,
+        0xd0,
+        0x7b, // ld a,e
+        0x32,
+        0x01,
+        0xd0,
+        0x3e,
+        qs_pitch,
+        0x32,
+        0x02,
+        0xd0,
+        // volume, last
+        0x3e,
+        qs_volume_value >> 8,
+        0x32,
+        0x00,
+        0xd0,
+        0xaf,
+        0x32,
+        0x01,
+        0xd0,
+        0x3e,
+        qs_volume,
+        0x32,
+        0x02,
+        0xd0,
+        0xc3, z80_main, 0x00, // jp poll
+    };
+    @memcpy(rom[z80_main..][0..main.len], &main);
+
+    for (pitch_table, 0..) |note, i| {
+        std.mem.writeInt(u16, rom[z80_table + i * 2 ..][0..2], note, .big);
+    }
+    return rom;
+}
+
+/// The same driver as the sound board's ROM: code encrypted for the opcode
+/// view, the pitch table for the data view. One byte cannot be both, which is
+/// exactly the point — a machine that fetched the table or read the code would
+/// come apart immediately.
+fn encryptedDriver(key: board.Kabuki) [z80_bytes]u8 {
+    const plain = soundDriver();
+    var rom: [z80_bytes]u8 = undefined;
+    for (&rom, plain, 0..) |*byte, v, i| {
+        const table = i >= z80_table and i < z80_table + pitch_table.len * 2;
+        byte.* = kabuki.encodeByte(key, @intCast(i), if (table) .data else .op, v);
+    }
+    return rom;
+}
+
+const sound_key = board.Kabuki{ .swap1 = 0x76543210, .swap2 = 0x24601357, .addr = 0x4343, .xor = 0x43 };
+
+const sound_board_file = std.fmt.comptimePrint(
+    \\# a board with a sound board on it, for the M3 acceptance
+    \\version = 1
+    \\layer_control   = 0x12
+    \\priority        = 0x14 0x16 0x08 0x0a
+    \\palette_control = 0x0c
+    \\layer_enable    = 0x01 0x02 0x04 0x08 0x10
+    \\gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0
+    \\kabuki = 0x{x} 0x{x} 0x{x} 0x{x}
+    \\program = 0x000000 0x{x} word sound.rom
+    \\audio   = 0x000000 0x{x} byte sound.z80
+    \\
+, .{
+    sound_key.swap1,
+    sound_key.swap2,
+    sound_key.addr,
+    sound_key.xor,
+    program_bytes,
+    z80_bytes,
+});
+
+fn writeSoundSet(dir: std.Io.Dir) !void {
+    var region: [program_bytes]u8 = @splat(romset.blank);
+    std.mem.writeInt(u32, region[0..4], initial_sp, .big);
+    std.mem.writeInt(u32, region[4..8], reset_pc, .big);
+    for (sound_program, 0..) |word, i| {
+        std.mem.writeInt(u16, region[reset_pc + i * 2 ..][0..2], word, .big);
+    }
+    swapWords(&region);
+    try dir.writeFile(testing.io, .{ .sub_path = "sound.rom", .data = &region });
+
+    const z80_rom = encryptedDriver(sound_key);
+    try dir.writeFile(testing.io, .{ .sub_path = "sound.z80", .data = &z80_rom });
+    try dir.writeFile(testing.io, .{ .sub_path = "sound.board", .data = sound_board_file });
+}
+
+fn loadSoundSet(tmp: *std.testing.TmpDir) !struct { board.Board, romset.Set } {
+    try writeSoundSet(tmp.dir);
+    var diag = board.Diag{};
+    const b = try board.parse(sound_board_file, &diag);
+    const rom = romset.load(testing.allocator, testing.io, tmp.parent_dir, &tmp.sub_path, &b, &diag) catch |err| {
+        std.debug.print("unexpected: {s}\n", .{diag.message()});
+        return err;
+    };
+    return .{ b, rom };
+}
+
+const sound_frames = 5;
+const sound_command_value = 2;
+
+test "a sound driver takes a command from the 68000 and sets a channel up" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const b, var rom = try loadSoundSet(&tmp);
+    defer rom.deinit(testing.allocator);
+
+    const c = try testing.allocator.create(cps.Cps);
+    defer testing.allocator.destroy(c);
+    c.* = .{ .board = b, .rom = rom };
+
+    var cpu: scheduler.Cpu = .{};
+    scheduler.reset(c, &cpu);
+    c.inputs.pad[0] = sound_command_value;
+    for (0..sound_frames) |_| scheduler.runFrame(c, &cpu);
+    try testing.expect(!cpu.halted);
+
+    // The command went across, was acknowledged, and never came back.
+    try testing.expectEqual(@as(u8, 0), c.sound.shared[0][0]);
+
+    // The channel is set up: the bank, the sample the command asked for, the
+    // pitch out of the table's *data* view, and a volume.
+    try testing.expectEqual(@as(u16, qs_bank_value), c.sound.q.regs[qs_bank]);
+    try testing.expectEqual(@as(u16, sound_command_value), c.sound.q.regs[qs_start]);
+    try testing.expectEqual(pitch_table[sound_command_value], c.sound.q.regs[qs_pitch]);
+    try testing.expectEqual(@as(u16, qs_volume_value), c.sound.q.regs[qs_volume]);
+
+    // And in that order, once: a driver that set the volume before the sample
+    // would play whatever the channel held before, and one that never saw the
+    // handshake would do the whole thing again every line.
+    var buf: [qsound.log_len]qsound.Write = undefined;
+    const log = c.sound.q.recent(&buf);
+    try testing.expectEqual(@as(usize, 4), log.len);
+    for ([_]u8{ qs_bank, qs_start, qs_pitch, qs_volume }, log) |reg, write| {
+        try testing.expectEqual(reg, write.reg);
+    }
+    try testing.expectEqual(@as(u64, 4), c.sound.q.writes);
+}
+
+test "the sound board runs at its own speed, and the pipeline runs at the machine's" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const b, var rom = try loadSoundSet(&tmp);
+    defer rom.deinit(testing.allocator);
+
+    const c = try testing.allocator.create(cps.Cps);
+    defer testing.allocator.destroy(c);
+    c.* = .{ .board = b, .rom = rom };
+
+    var cpu: scheduler.Cpu = .{};
+    scheduler.reset(c, &cpu);
+
+    var frames: u64 = 0;
+    for (0..sound_frames) |_| {
+        scheduler.runFrame(c, &cpu);
+        while (c.mixer.pop()) |_| frames += 1;
+    }
+
+    // The Z80 got its line's worth of cycles every line, give or take the
+    // instruction that straddled the boundary.
+    const want_cycles = scheduler.sound_per_line * video.lines_per_frame * sound_frames;
+    try testing.expect(c.sound.cpu.cycles >= want_cycles);
+    try testing.expect(c.sound.cpu.cycles - want_cycles < scheduler.sound_per_line);
+
+    // Its interrupt arrived at 250 Hz: five frames of 59.6374 Hz is 20.96 of
+    // them, and the handler counted them where the 68000 can read the count.
+    const want_ticks = 250 * sound_frames * scheduler.refresh_den / scheduler.refresh_num;
+    try testing.expectEqual(@as(u8, want_ticks), c.sound.shared[1][0]);
+
+    // And the chip's 24.038 kHz came out as 48 kHz, at the rate a machine
+    // running at 59.6374 Hz produces it: one frame's worth of sound per frame,
+    // which is what paces the machine once there is a device to play it on.
+    const per_frame = @as(u64, audio.sample_rate) * scheduler.refresh_den / scheduler.refresh_num;
+    const want_frames = per_frame * sound_frames;
+    try testing.expect(frames > want_frames - 8 and frames < want_frames + 8);
 }

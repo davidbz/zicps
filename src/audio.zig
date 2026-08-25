@@ -6,12 +6,14 @@
 //! and shipped as an integer table, so a headless run resamples to the same
 //! bytes on every machine.
 //!
-//! Copied verbatim from zigesis, tests and all, because none of this is one
-//! machine's: it is a rate fraction and a filter. What is still that machine's
-//! is the naming — `Chip`'s two sources, and the rates the comments quote —
-//! along with one real gap, since a QSound board's 24 kHz has to come *up* to
-//! 48 kHz and this bank only drops a rate. Both are M3's, where the first
-//! sample arrives (DESIGN.md §6.2).
+//! Copied from zigesis, tests and all, because none of this is one machine's:
+//! it is a rate fraction and a filter. Two things are this machine's, and both
+//! landed at M3 — a QSound board has one sound chip rather than two, so there
+//! is one source and no chip to name it by, and its 24.038 kHz has to come *up*
+//! to 48 kHz where the Genesis's chips came down. The bank is the same bank
+//! either way: what changes is that an input sample can finish more than one
+//! output frame, and that the cutoff is set by whichever rate is lower
+//! (DESIGN.md §6.2).
 
 const std = @import("std");
 
@@ -29,7 +31,8 @@ pub const Frame = extern struct { l: i16, r: i16 };
 /// Output samples per native-rate input sample, as an exact integer
 /// fraction. Chip rates are not whole numbers of hertz, so keeping the
 /// ratio as a fraction is what stops the resampled rate from drifting.
-/// Downsampling only: `out` must not exceed `in`.
+/// Either direction: `out` above `in` finishes more than one output frame
+/// from some input samples, which is the only difference upsampling makes.
 pub const Rate = struct { out: u64, in: u64 };
 
 /// The antialias filter for the rate drop, as a polyphase windowed-sinc bank.
@@ -46,23 +49,31 @@ pub const Rate = struct { out: u64, in: u64 };
 /// was the high beeps that sounded off.
 ///
 /// ponytail: both sizes were measured, not guessed. Past 65 taps nothing
-/// improves (97 and 129 scored identically), and past 32 phases nothing
-/// improves either; what is left is a single tone up at 23.5 kHz, which no
-/// amount of filter fixes and nothing can hear. Revisit only if a chip lands
-/// here with a harsher ratio than the PSG's 4.66:1.
+/// improves (97 and 129 scored identically). 32 phases was enough coming
+/// down, and is not enough going up: quantising the fractional delay to 32
+/// steps puts spurs 1.2 kHz either side of a 3 kHz QSound tone at -48 dB,
+/// because upsampling walks the bank across every output frame instead of
+/// once per 4.66 of them. Doubling the phases buys the 6 dB a bit of delay
+/// resolution is worth, all the way to the taps' own stopband: 64 phases
+/// measured -49 dB, 128 -55 dB, 256 -61 dB. 128 is where that stops being
+/// worth 33 KB of table; go to 256 only if a QSound tone is ever heard
+/// buzzing.
 const fir_taps = 65;
-const fir_phases = 32;
+const fir_phases = 128;
 const fir_shift = 15;
 
-/// As a fraction of the output rate: 20 kHz at 48 kHz out, which leaves the
-/// stopband down before anything can fold past Nyquist.
+/// As a fraction of the lower of the two rates: 20 kHz dropping 53 kHz to
+/// 48 kHz, 10 kHz raising 24 kHz to 48 kHz. Either way it leaves the stopband
+/// down before anything can fold past the Nyquist that matters — the output's
+/// when a rate comes down, the input's when it goes up, since upsampling
+/// cannot invent band and only has to keep from repeating it.
 const fir_cutoff = 0.417;
 
 fn firBank(comptime rate: Rate) [fir_phases][fir_taps]i32 {
     @setEvalBranchQuota(200_000);
     const half = fir_taps / 2;
     // Cutoff in cycles per *input* sample, which is what the sinc is in terms of.
-    const fc = fir_cutoff * @as(f64, @floatFromInt(rate.out)) / @as(f64, @floatFromInt(rate.in));
+    const fc = fir_cutoff * @as(f64, @floatFromInt(@min(rate.out, rate.in))) / @as(f64, @floatFromInt(rate.in));
 
     var bank: [fir_phases][fir_taps]i32 = undefined;
     for (&bank, 0..) |*row, p| {
@@ -95,80 +106,71 @@ fn firBank(comptime rate: Rate) [fir_phases][fir_taps]i32 {
     return bank;
 }
 
-/// The two sound chips, each resampled by its own filter state and summed in
-/// the ring. They run at unrelated native rates — mclk/240 and mclk/1008 —
-/// so there is no common grid to add them on before the rate drop.
-pub const Chip = enum(u1) { psg, ym };
-
-/// One chip's path from its native rate to the output rate.
+/// The sound chip's path from its native rate to the output rate.
 const Source = struct {
     /// Fractional position toward the next output sample, carried across
-    /// calls exactly like `genesis.zig`'s `mclk_debt`.
+    /// calls exactly like the scheduler's per-part tick debt.
     phase: u64 = 0,
     /// The last `fir_taps` native samples, oldest first at `hist_at`.
     hist: [fir_taps]Frame = @splat(.{ .l = 0, .r = 0 }),
     hist_at: usize = 0,
-    /// Output frames this source has finished contributing to.
-    produced: u64 = 0,
 };
 
 pub const Mixer = struct {
     /// Frames under construction, indexed by absolute frame number. Wider
-    /// than the output so two full-scale chips can sum without wrapping;
+    /// than the output because a windowed sinc overshoots a square edge;
     /// clamped on the way out.
     ring: [capacity]Frame32 = @splat(.{}),
-    /// Frames handed to the consumer, and the furthest any source has run.
+    /// Frames handed to the consumer, and frames the chip has finished.
     emitted: u64 = 0,
     produced: u64 = 0,
 
-    sources: [2]Source = @splat(.{}),
+    source: Source = .{},
 
     volume_pct: u8 = 100,
 
     const Frame32 = struct { l: i32 = 0, r: i32 = 0 };
 
-    /// Feeds one native-rate sample in, finishing an output frame whenever
-    /// enough of them have accumulated to cover one.
-    pub fn pushNative(m: *Mixer, chip: Chip, l: i16, r: i16, comptime rate: Rate) void {
-        const s = &m.sources[@intFromEnum(chip)];
+    /// Feeds one native-rate sample in, finishing every output frame it
+    /// completes: one at most when the rate is coming down, and sometimes two
+    /// when it is going up.
+    pub fn pushNative(m: *Mixer, l: i16, r: i16, comptime rate: Rate) void {
+        const s = &m.source;
         s.hist[s.hist_at] = .{ .l = l, .r = r };
         s.hist_at = (s.hist_at + 1) % fir_taps;
 
         s.phase += rate.out;
-        if (s.phase < rate.in) return;
-        s.phase -= rate.in;
-        // Consumer fell behind: drop this frame rather than sum into one it
-        // has not read yet. Both sources stall on the same test, so they stay
-        // on the same frame when it catches up.
-        // Addition, not subtraction: a source that somehow fell behind the
-        // emitted frame would underflow into a permanent silent stall.
-        if (s.produced >= m.emitted + capacity) return;
+        while (s.phase >= rate.in) {
+            s.phase -= rate.in;
+            // Consumer fell behind: drop this frame rather than write into one
+            // it has not read yet.
+            // Addition, not subtraction: a producer that somehow fell behind
+            // the emitted frame would underflow into a permanent silent stall.
+            if (m.produced >= m.emitted + capacity) continue;
 
-        // What is left in `phase` is how far past the output instant this
-        // sample sits, in units of `rate.out` per input sample. That fraction
-        // is exactly what selects the filter phase.
-        const bank = comptime firBank(rate);
-        const p = s.phase * fir_phases / rate.out;
+            // What is left in `phase` is how far past the output instant this
+            // sample sits, in units of `rate.out` per input sample. That
+            // fraction is exactly what selects the filter phase.
+            const bank = comptime firBank(rate);
+            const p = s.phase * fir_phases / rate.out;
 
-        var left: i64 = 0;
-        var right: i64 = 0;
-        for (bank[p], 0..) |c, j| {
-            const h = s.hist[(s.hist_at + j) % fir_taps];
-            left += @as(i64, c) * h.l;
-            right += @as(i64, c) * h.r;
+            var left: i64 = 0;
+            var right: i64 = 0;
+            for (bank[p], 0..) |c, j| {
+                const h = s.hist[(s.hist_at + j) % fir_taps];
+                left += @as(i64, c) * h.l;
+                right += @as(i64, c) * h.r;
+            }
+
+            const slot = &m.ring[m.produced % capacity];
+            slot.l += @intCast(left >> fir_shift);
+            slot.r += @intCast(right >> fir_shift);
+            m.produced += 1;
         }
-
-        const slot = &m.ring[s.produced % capacity];
-        slot.l += @intCast(left >> fir_shift);
-        slot.r += @intCast(right >> fir_shift);
-        s.produced += 1;
-        m.produced = @max(m.produced, s.produced);
     }
 
-    /// Frames every source has finished. A source runs at most one frame
-    /// ahead of the other — an output frame is 1118 mclk and the slower
-    /// chip's native tick is 1008 — so the frame before the leader is always
-    /// complete.
+    /// Frames finished and not yet handed out. The newest is held back by one:
+    /// it is the frame the next input sample may still land on.
     pub fn ready(m: *const Mixer) usize {
         return @intCast(m.produced -| m.emitted -| 1);
     }
@@ -181,8 +183,8 @@ pub const Mixer = struct {
             slot.* = .{};
             m.emitted += 1;
         }
-        // Two chips summed, and a windowed sinc that overshoots on a square
-        // edge, both ring past i16. Clamp rather than wrap: wrapping turns a
+        // A windowed sinc overshoots on a square edge, and the volume knob
+        // multiplies: either can ring past i16. Clamp rather than wrap: wrapping turns a
         // loud note into a burst of noise.
         return .{ .l = m.scale(slot.l), .r = m.scale(slot.r) };
     }
@@ -205,18 +207,23 @@ const test_rate = Rate{ .out = 48_000 * 240, .in = 53_693_175 };
 /// output frames are still mixing in the zero-filled history. That is real
 /// behaviour — the machine does start from silence — so the tests step over
 /// the ramp rather than pretending it is not there.
-const settled = fir_taps;
+/// In output frames, which is not the same count in both directions: coming
+/// up, one input sample is worth two output frames and the ramp is twice as
+/// long in frames as it is in native samples.
+fn settled(comptime rate: Rate) u64 {
+    return fir_taps * rate.out / rate.in + 1;
+}
 
 test "downsampling a constant signal yields that constant, at the right rate" {
     var m = Mixer{};
     const native_ticks: u64 = 40_000; // fewer output frames than `capacity`, so nothing is dropped
-    for (0..native_ticks) |_| m.pushNative(.psg, 1000, 1000, test_rate);
+    for (0..native_ticks) |_| m.pushNative(1000, 1000, test_rate);
 
     var frames: u64 = 0;
     while (m.pop()) |f| : (frames += 1) {
         // Unity DC gain on every phase, or a constant would ripple as the
         // fractional position walks across the bank.
-        if (frames >= settled) try testing.expectEqual(@as(i16, 1000), f.l);
+        if (frames >= settled(test_rate)) try testing.expectEqual(@as(i16, 1000), f.l);
     }
 
     // One frame short of what the ratio produces: the last one is not
@@ -224,22 +231,26 @@ test "downsampling a constant signal yields that constant, at the right rate" {
     try testing.expectEqual(native_ticks * test_rate.out / test_rate.in - 1, frames);
 }
 
-const native_hz = @as(f64, sample_rate) *
-    @as(f64, @floatFromInt(test_rate.in)) / @as(f64, @floatFromInt(test_rate.out));
+/// The rate the chip runs at, in hertz: what the test signal is generated
+/// against, either side of the conversion.
+fn nativeHz(comptime rate: Rate) f64 {
+    return @as(f64, sample_rate) *
+        @as(f64, @floatFromInt(rate.in)) / @as(f64, @floatFromInt(rate.out));
+}
 
 /// Pushes a sine at `hz` through the mixer at the native rate and fills `out`
 /// with the settled output.
-fn resampleSine(hz: f64, amplitude: f64, out: []i16) void {
+fn resampleSine(comptime rate: Rate, hz: f64, amplitude: f64, out: []i16) void {
     var m = Mixer{};
     var frames: usize = 0;
     var kept: usize = 0;
     var i: usize = 0;
     while (kept < out.len) : (i += 1) {
-        const t = @as(f64, @floatFromInt(i)) / native_hz;
+        const t = @as(f64, @floatFromInt(i)) / nativeHz(rate);
         const v: i16 = @intFromFloat(amplitude * @sin(2 * std.math.pi * hz * t));
-        m.pushNative(.psg, v, v, test_rate);
+        m.pushNative(v, v, rate);
         while (m.pop()) |f| : (frames += 1) {
-            if (frames >= settled and kept < out.len) {
+            if (frames >= settled(rate) and kept < out.len) {
                 out[kept] = f.l;
                 kept += 1;
             }
@@ -248,9 +259,9 @@ fn resampleSine(hz: f64, amplitude: f64, out: []i16) void {
 }
 
 /// Peak amplitude of `hz` after the rate drop.
-fn peakOf(hz: f64, amplitude: f64) i16 {
+fn peakOf(comptime rate: Rate, hz: f64, amplitude: f64) i16 {
     var buf: [8192]i16 = undefined;
-    resampleSine(hz, amplitude, &buf);
+    resampleSine(rate, hz, amplitude, &buf);
 
     var peak: i16 = 0;
     for (buf) |v| peak = @max(peak, @as(i16, @intCast(@abs(v))));
@@ -260,7 +271,7 @@ fn peakOf(hz: f64, amplitude: f64) i16 {
 test "a tone inside the passband survives the rate drop at full amplitude" {
     // 1 kHz is far below the 20 kHz cutoff, so it should come through
     // essentially untouched.
-    const peak = peakOf(1000, 8000);
+    const peak = peakOf(test_rate, 1000, 8000);
     try testing.expect(peak > 7800 and peak <= 8100);
 }
 
@@ -287,7 +298,7 @@ test "a resampled sine is still just that sine, so the output instants are right
     // stopband tests above both sail straight through it.
     const n = 4800;
     var buf: [n]i16 = undefined;
-    resampleSine(3500, 8000, &buf);
+    resampleSine(test_rate, 3500, 8000, &buf);
 
     var total: f64 = 0;
     for (buf) |v| total += @as(f64, @floatFromInt(v)) * @as(f64, @floatFromInt(v));
@@ -302,7 +313,7 @@ test "a tone above the output's Nyquist is rejected instead of folding back" {
     // 30 kHz cannot be represented at 48 kHz; a boxcar passed enough of it to
     // alias down as an audible inharmonic tone, which is what made PSG beeps
     // sound wrong. It must arrive attenuated by better than 40 dB.
-    const peak = peakOf(30_000, 8000);
+    const peak = peakOf(test_rate, 30_000, 8000);
     try testing.expect(peak < 80);
 }
 
@@ -312,7 +323,7 @@ test "the phase remainder carries, so long runs do not drift" {
     const per_batch: u64 = 10_000;
     var produced: u64 = 0;
     for (0..batches) |_| {
-        for (0..per_batch) |_| m.pushNative(.psg, 0, 0, test_rate);
+        for (0..per_batch) |_| m.pushNative(0, 0, test_rate);
         while (m.pop()) |_| produced += 1;
     }
 
@@ -326,8 +337,8 @@ test "volume_pct scales the output linearly" {
     var half = Mixer{ .volume_pct = 50 };
     var full = Mixer{};
     for (0..100) |_| {
-        half.pushNative(.psg, 1000, 1000, test_rate);
-        full.pushNative(.psg, 1000, 1000, test_rate);
+        half.pushNative(1000, 1000, test_rate);
+        full.pushNative(1000, 1000, test_rate);
     }
     try testing.expectEqual(@divTrunc(full.pop().?.l, 2), half.pop().?.l);
 }
@@ -336,7 +347,7 @@ test "the ring drops frames instead of overflowing once full" {
     var m = Mixer{};
     // Enough native samples for well over a ring's worth of output frames,
     // with nothing draining them.
-    for (0..(capacity + 1000) * test_rate.in / test_rate.out) |_| m.pushNative(.psg, 1, 1, test_rate);
+    for (0..(capacity + 1000) * test_rate.in / test_rate.out) |_| m.pushNative(1, 1, test_rate);
     try testing.expectEqual(@as(usize, capacity - 1), m.ready());
 
     var drained: usize = 0;
@@ -344,33 +355,61 @@ test "the ring drops frames instead of overflowing once full" {
     try testing.expectEqual(@as(usize, capacity - 1), drained);
 }
 
-test "two chips at different rates sum into the same frames" {
-    // Half the ratio, so this source produces the same output rate from a
-    // quarter as many native samples.
-    const other = Rate{ .out = test_rate.out * 4, .in = test_rate.in };
-    var m = Mixer{};
-    for (0..40_000) |i| {
-        m.pushNative(.psg, 1000, 1000, test_rate);
-        if (i % 4 == 0) m.pushNative(.ym, 300, -300, other);
-    }
+test "a loud chip and the volume up clamps instead of wrapping" {
+    var m = Mixer{ .volume_pct = 200 };
+    for (0..40_000) |_| m.pushNative(30_000, 30_000, test_rate);
 
     var frames: usize = 0;
     while (m.pop()) |f| : (frames += 1) {
-        if (frames < settled) continue;
-        try testing.expectEqual(@as(i16, 1300), f.l);
-        try testing.expectEqual(@as(i16, 700), f.r);
+        if (frames >= settled(test_rate)) try testing.expectEqual(@as(i16, std.math.maxInt(i16)), f.l);
     }
     try testing.expect(frames > 0);
 }
 
-test "the mixer clamps instead of wrapping when both chips run loud" {
+// ------------------------------------------------------- going the other way
+
+/// What a QSound board arrives at: 60 MHz over 2496 is 24.038 kHz, which has
+/// to come *up* to 48 kHz. The machine's own copy of this fraction lives in
+/// `scheduler.zig`; this is here so the filter is measured at the shape of
+/// ratio it will actually see.
+const up_rate = Rate{ .out = sample_rate * 2496, .in = 60_000_000 };
+
+test "upsampling a constant signal yields that constant, at the right rate" {
     var m = Mixer{};
-    for (0..40_000) |_| {
-        m.pushNative(.psg, 30_000, 30_000, test_rate);
-        m.pushNative(.ym, 30_000, 30_000, test_rate);
-    }
-    var frames: usize = 0;
+    const native_ticks: u64 = 4_000; // ~8k output frames, well under `capacity`
+    for (0..native_ticks) |_| m.pushNative(1000, 1000, up_rate);
+
+    var frames: u64 = 0;
     while (m.pop()) |f| : (frames += 1) {
-        if (frames >= settled) try testing.expectEqual(@as(i16, std.math.maxInt(i16)), f.l);
+        // Same unity-gain requirement as coming down, and it is the one that
+        // catches a phase index computed against the wrong rate: with `out`
+        // above `in`, two frames come out of one input sample and the second
+        // one is the one that ripples.
+        if (frames >= settled(up_rate)) try testing.expectEqual(@as(i16, 1000), f.l);
     }
+    try testing.expectEqual(native_ticks * up_rate.out / up_rate.in - 1, frames);
+}
+
+test "the image an upsample invents is measured, not assumed" {
+    // Raising a rate does not fold anything down — there is nothing above the
+    // input's Nyquist to fold — it repeats the spectrum around the input rate.
+    // A 3 kHz tone from a 24.038 kHz chip therefore comes with an image at
+    // 21.04 kHz, which 48 kHz output is perfectly able to carry, and which the
+    // filter is what removes.
+    const n = 4800; // 10 Hz bins at 48 kHz
+    var buf: [n]i16 = undefined;
+    resampleSine(up_rate, 3000, 8000, &buf);
+
+    const mag = magAt(&buf, 3000);
+    const tone = 2 * mag * mag / n;
+    var total: f64 = 0;
+    for (buf) |v| total += @as(f64, @floatFromInt(v)) * @as(f64, @floatFromInt(v));
+
+    // Everything the resampler put there that the tone did not: image, filter
+    // ripple, phase-quantisation spurs and rounding together. Measured at
+    // -55.0 dB under the tone, the spurs at 3000 +- 1.2 kHz being what is
+    // left (see `fir_phases`); the image itself is below them. The bound is
+    // slack because this is a floor being recorded, not a target being hit.
+    const floor = 10 * @log10((total - tone) / tone);
+    try testing.expect(floor < -50);
 }
