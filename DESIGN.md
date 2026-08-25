@@ -802,7 +802,8 @@ Deliverables: a sweep over whatever sets are present, in the shape of zigesis's
 report whether the CPU halted, whether the picture is blank, how long it has
 been still, and whether anything was heard. Nothing pinned, nothing named,
 nothing failing — it is triage, and it says where to point a window. Plus the
-nice-to-haves of §5.1 as they earn their keep.
+video state differential of §10, which is what turns a set the sweep flags into
+a named bug, and the nice-to-haves of §5.1 as they earn their keep.
 
 Acceptance: every set the author can test boots and plays, and every remaining
 issue has a reproduction through the replay harness.
@@ -832,6 +833,34 @@ advance and per-channel mute already exist by then.
 - Hardware behaviour that no ROM reaches is unit-tested by building the state in
   memory — poke graphics RAM, render a line, hash it — the way zigesis tests the
   video modes its test ROMs never enter.
+- **What is measured against something outside this project, and what is not.**
+  The two CPUs are, and the DSP is: SingleStepTests upstream, qsound-hle at M4.
+  The video chip, the CPS-B configuration, the bus and the timing are not. The
+  acceptance ROM's pinned scores and frame hashes are this project's renderer
+  measured against this project's renderer, which catches a regression exactly
+  and a misreading of the hardware not at all. Two outside references close
+  that, and neither of them is a gate:
+  - **The board's own service menu**, which arrives free with M5. §5.1 requires
+    the service and test inputs and M5 delivers them; every board then has a
+    diagnostic that draws a crosshatch and colour bars, walks every input, and
+    runs a sound test naming the channel it plays. A known-correct picture and a
+    known-correct order, reported as text, on any set the author owns. Checked
+    by hand.
+  - **MAME's debugger as a source of hardware state**, the way jtcps1 verifies
+    its video: dump graphics RAM and the CPS-A/B register file at a chosen
+    frame, load that state into `Video`, render it, and compare. That is the
+    bullet above with the poke coming from a real game rather than from us, and
+    it is what separates a wrong renderer from a wrong bus when a set draws
+    badly. A dump is derived from a ROM nobody may redistribute, so it lives in
+    gitignored `testdata/` and gates nothing. M7's, or sooner the first time a
+    real set looks wrong.
+- **The homebrew that exists, and why it stays out of the tree.** cal2's CPS1
+  diagnostics ROM tests work RAM and shared graphics RAM, checksums the program
+  ROMs and plays music, reporting all of it as text — the shape this project
+  wants. It is hosted by the author's permission rather than under a licence,
+  and it wants a CPS-B-21 C board, so it is something to run by hand once the
+  video is solid and never something this repo fetches. The rule below is why:
+  not redistributable, so not a gate.
 - Non-redistributable ROMs are never committed or fetched, and no test depends
   on one. Anything checked against a board the author owns is reported as such
   and is not a regression gate, because a hash nobody else can reproduce is not
@@ -856,6 +885,8 @@ Machine and CPUs:
   https://fabiensanglard.net/ccps/
 - ArcadeHacker's CPS-1 series on the batteries, the CPS-B-21 configuration and
   the Kabuki keys: http://arcadehacker.blogspot.com/2015/04/capcom-cps1-part-1.html
+- cal2's CPS1 diagnostics ROM, hosted by permission — run by hand, never
+  fetched (§10): https://jammarcade.net/cps1-diagnostics-rom/
 
 Audio:
 
