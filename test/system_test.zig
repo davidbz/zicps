@@ -263,7 +263,7 @@ const gfx_stars = gfx_star_bytes * romset.pixels_per_byte / 128;
 /// raster counters read back live, so a priority mask parked on one of them
 /// would fire an interrupt every frame.
 const layer_control = 0x00;
-const priority_regs = [video.priority_groups]u8{ 0x02, 0x04, 0x06, 0x08 };
+const priority_regs = [board.priority_groups]u8{ 0x02, 0x04, 0x06, 0x08 };
 const palette_control = 0x0a;
 const raster_regs = [2]u8{ 0x10, 0x12 };
 
@@ -728,21 +728,24 @@ test "the test ROM draws its three tilemaps" {
 /// The hashes moved at M3 and again at M4, and the scores did not, which is
 /// the whole story of those milestones from the picture's side: `scheduler.hash`
 /// took the sound board in and then the chip's own state, and nothing draws
-/// differently for it.
+/// differently for it. They moved a third time when the CPS-B register file was
+/// cut back to the 0x40 bytes the 68000 actually decodes — 128 bytes the hash
+/// had been reading and no bus cycle could ever write — and the scores held
+/// again, which is what says it was dead space and not a register in use.
 const Pin = struct {
     scores: [video.palette_pages]u32,
     hash: u64,
 };
 
 const pinned = [page_count]Pin{
-    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0x9e28759153905dbd },
-    .{ .scores = .{ 1680, 783, 1984, 6358, 0, 0 }, .hash = 0xc5ae261ee2b7e88c },
-    .{ .scores = .{ 1616, 783, 2048, 6358, 0, 0 }, .hash = 0xc09d9b2d2bb304ec },
-    .{ .scores = .{ 1680, 783, 0, 8217, 0, 0 }, .hash = 0xf2b9608215a5a48e },
-    .{ .scores = .{ 0, 783, 1488, 8176, 0, 0 }, .hash = 0x82427d2f1a063344 },
-    .{ .scores = .{ 0, 0, 0, 0, 168, 168 }, .hash = 0x737f11cff9cd1186 },
-    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0x99190364dab6c27b },
-    .{ .scores = .{ 0, 783, 2208, 6042, 0, 0 }, .hash = 0xb3acf606c85211df },
+    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0xf9b1e66f375dd716 },
+    .{ .scores = .{ 1680, 783, 1984, 6358, 0, 0 }, .hash = 0xbb6a5f7fc54ddb93 },
+    .{ .scores = .{ 1616, 783, 2048, 6358, 0, 0 }, .hash = 0x42f4790b997d1507 },
+    .{ .scores = .{ 1680, 783, 0, 8217, 0, 0 }, .hash = 0x88a58fdee1f2334b },
+    .{ .scores = .{ 0, 783, 1488, 8176, 0, 0 }, .hash = 0x14bc183ee84efeed },
+    .{ .scores = .{ 0, 0, 0, 0, 168, 168 }, .hash = 0x92799c66b2a5de73 },
+    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0x9d92f5078dc9d2d1 },
+    .{ .scores = .{ 0, 783, 2208, 6042, 0, 0 }, .hash = 0xd828928db372d6c6 },
 };
 
 test "scoreboard: every page of the test ROM draws what it drew" {

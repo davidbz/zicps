@@ -64,7 +64,8 @@ pub const qsound_rate = audio.Rate{ .out = audio.sample_rate * qsound_divider, .
 /// clock: 8 MHz over 32000 is 250 Hz, which is what a driver counts its
 /// envelope ticks on. Nothing on the board makes it line-synchronous, so it
 /// gets the same debt treatment as the sample clock.
-pub const sound_irq_hz = sound_hz / 32_000;
+pub const sound_irq_divider = 32_000;
+pub const sound_irq_hz = sound_hz / sound_irq_divider;
 pub const ref_per_sound_irq = reference_hz / sound_irq_hz;
 
 /// The refresh rate the picture actually runs at, as a ratio, so nothing in the

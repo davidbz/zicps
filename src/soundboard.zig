@@ -40,6 +40,8 @@ pub const shared1_hi = 0xffff;
 pub const fixed_bytes = fixed_hi - fixed_lo + 1;
 pub const bank_bytes = bank_hi - bank_lo + 1;
 pub const shared_bytes = shared0_hi - shared0_lo + 1;
+/// Two separate RAMs, each of which both CPUs reach at an address of its own.
+pub const shared_windows = 2;
 
 /// Where the banked half of the audio region starts. The fixed half is a whole
 /// 64 KiB slot wide even though only half of it is ROM, which is why a board
@@ -63,7 +65,7 @@ pub const SoundBoard = struct {
     rom: []const u8 = &.{},
 
     /// The Z80's RAM, and the 68000's window on it.
-    shared: [2][shared_bytes]u8 = @splat(@splat(0)),
+    shared: [shared_windows][shared_bytes]u8 = @splat(@splat(0)),
 
     bank: u4 = 0,
     /// The periodic interrupt, held until the CPU takes it.

@@ -19,7 +19,10 @@ pub const version = 1;
 pub const Reg = ?u8;
 
 /// How wide the CPS-B window is, and so how far a register offset can reach.
-pub const cps_b_bytes = 0xc0;
+/// The 68000 decodes `0x800140-0x80017f` and no further, so an offset above
+/// this names a register no bus cycle can reach. `cps.zig` asserts the two
+/// agree.
+pub const cps_b_bytes = 0x40;
 
 /// The six things the video chip draws. The order is the bit order of a gfx
 /// range's type mask.
@@ -39,7 +42,7 @@ pub const max_roms = 64;
 
 /// The four halves of a Kabuki key (DESIGN.md §7.2). Two nibble permutations,
 /// an address key and a XOR; `kabuki.zig` turns them into the two views of the
-/// sound ROM at M3.
+/// sound ROM.
 pub const Kabuki = struct {
     swap1: u32,
     swap2: u32,
@@ -49,6 +52,11 @@ pub const Kabuki = struct {
 
 /// Which chip on the board a file's bytes belong to.
 pub const Region = enum { program, gfx, audio, qsound };
+pub const region_count = @typeInfo(Region).@"enum".fields.len;
+
+/// A tile's attribute word picks one of four priority masks, so the PAL decodes
+/// four registers to hold them.
+pub const priority_groups = 4;
 
 /// How a file's bytes land in their region: one chip of a set is rarely a
 /// contiguous slice of the address space the CPU sees.
@@ -102,7 +110,7 @@ pub const GfxRange = struct {
 pub const Board = struct {
     // CPS-B-21 register offsets. These are the ones the battery holds.
     layer_control: Reg = null,
-    priority: [4]Reg = @splat(null),
+    priority: [priority_groups]Reg = @splat(null),
     palette_control: Reg = null,
     /// The self-test register some boards answer with a fixed value, and the
     /// value they answer with. A game that checks it will not boot without it.
@@ -171,6 +179,25 @@ pub const Diag = struct {
 
 pub const Error = error{BadBoardFile};
 
+/// Every key a board file carries that is not a ROM line. The `Region` names
+/// are keys too, and are matched after these.
+const Key = enum {
+    version,
+    layer_control,
+    priority,
+    palette_control,
+    id,
+    multiply,
+    in2,
+    in3,
+    out2,
+    layer_enable,
+    raster_line,
+    bank_sizes,
+    gfx_bank,
+    kabuki,
+};
+
 /// Parses a board file. Every failure carries a line number and the key that
 /// was wrong, or the list of keys that never appeared.
 pub fn parse(text: []const u8, diag: *Diag) Error!Board {
@@ -189,48 +216,52 @@ pub fn parse(text: []const u8, diag: *Diag) Error!Board {
         const key = trim(line[0..eq]);
         var vals = std.mem.tokenizeAny(u8, line[eq + 1 ..], " \t,");
 
-        if (!seen_version and !std.mem.eql(u8, key, "version"))
+        const what = std.meta.stringToEnum(Key, key);
+        if (!seen_version and what != .version)
             return diag.say("line {d}: expected `version = {d}` first; this does not look like a board file", .{ line_no, version });
 
-        if (std.mem.eql(u8, key, "version")) {
-            const v = try int(u32, &vals, key, line_no, diag);
-            if (v != version) return diag.say("line {d}: board file version {d}, this build reads {d}", .{ line_no, v, version });
-            seen_version = true;
-        } else if (std.mem.eql(u8, key, "layer_control")) {
-            b.layer_control = try reg(&vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "priority")) {
-            for (&b.priority) |*p| p.* = try reg(&vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "palette_control")) {
-            b.palette_control = try reg(&vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "id")) {
-            b.id_offset = try reg(&vals, key, line_no, diag);
-            b.id_value = try int(u16, &vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "multiply")) {
-            b.mult_factor1 = try reg(&vals, key, line_no, diag);
-            b.mult_factor2 = try reg(&vals, key, line_no, diag);
-            b.mult_result_lo = try reg(&vals, key, line_no, diag);
-            b.mult_result_hi = try reg(&vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "in2")) {
-            b.in2_offset = try reg(&vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "in3")) {
-            b.in3_offset = try reg(&vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "out2")) {
-            b.out2_offset = try reg(&vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "layer_enable")) {
-            for (&b.layer_enable) |*m| m.* = try int(u16, &vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "raster_line")) {
-            for (&b.raster_line) |*r| r.* = try reg(&vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "bank_sizes")) {
-            for (&b.bank_sizes) |*s| s.* = try int(u32, &vals, key, line_no, diag);
-        } else if (std.mem.eql(u8, key, "gfx_bank")) {
-            try addRange(&b, &vals, line_no, diag);
-        } else if (std.mem.eql(u8, key, "kabuki")) {
-            b.kabuki = .{
-                .swap1 = try int(u32, &vals, key, line_no, diag),
-                .swap2 = try int(u32, &vals, key, line_no, diag),
-                .addr = try int(u16, &vals, key, line_no, diag),
-                .xor = try int(u8, &vals, key, line_no, diag),
-            };
+        if (what) |k| {
+            switch (k) {
+                .version => {
+                    const v = try int(u32, &vals, key, line_no, diag);
+                    if (v != version) return diag.say("line {d}: board file version {d}, this build reads {d}", .{ line_no, v, version });
+                    seen_version = true;
+                },
+                .layer_control => b.layer_control = try reg(&vals, key, line_no, diag),
+                .priority => for (&b.priority) |*p| {
+                    p.* = try reg(&vals, key, line_no, diag);
+                },
+                .palette_control => b.palette_control = try reg(&vals, key, line_no, diag),
+                .id => {
+                    b.id_offset = try reg(&vals, key, line_no, diag);
+                    b.id_value = try int(u16, &vals, key, line_no, diag);
+                },
+                .multiply => {
+                    b.mult_factor1 = try reg(&vals, key, line_no, diag);
+                    b.mult_factor2 = try reg(&vals, key, line_no, diag);
+                    b.mult_result_lo = try reg(&vals, key, line_no, diag);
+                    b.mult_result_hi = try reg(&vals, key, line_no, diag);
+                },
+                .in2 => b.in2_offset = try reg(&vals, key, line_no, diag),
+                .in3 => b.in3_offset = try reg(&vals, key, line_no, diag),
+                .out2 => b.out2_offset = try reg(&vals, key, line_no, diag),
+                .layer_enable => for (&b.layer_enable) |*m| {
+                    m.* = try int(u16, &vals, key, line_no, diag);
+                },
+                .raster_line => for (&b.raster_line) |*r| {
+                    r.* = try reg(&vals, key, line_no, diag);
+                },
+                .bank_sizes => for (&b.bank_sizes) |*s| {
+                    s.* = try int(u32, &vals, key, line_no, diag);
+                },
+                .gfx_bank => try addRange(&b, &vals, line_no, diag),
+                .kabuki => b.kabuki = .{
+                    .swap1 = try int(u32, &vals, key, line_no, diag),
+                    .swap2 = try int(u32, &vals, key, line_no, diag),
+                    .addr = try int(u16, &vals, key, line_no, diag),
+                    .xor = try int(u8, &vals, key, line_no, diag),
+                },
+            }
         } else if (std.meta.stringToEnum(Region, key)) |region| {
             try addRom(&b, region, &vals, line_no, diag);
         } else {
@@ -463,6 +494,10 @@ test "a board file that is wrong says what is wrong with it" {
     try expectRefused("version = 99\n", "version 99");
     try expectRefused(example ++ "\nnonsense = 3\n", "unknown key `nonsense`");
     try expectRefused(example ++ "\nlayer_control = 0x13\n", "is odd");
+    // The window the 68000 decodes is 0x40 bytes. An offset above it parses as
+    // a number but names a register no bus cycle can ever reach, which would
+    // show up as a video bug rather than as the bad file it is.
+    try expectRefused(example ++ "\nlayer_control = 0x40\n", "past the end of the CPS-B window");
     try expectRefused(example ++ "\nlayer_control = fish\n", "`fish`");
     try expectRefused(example ++ "\npriority = 0x14 0x16\n", "needs a register offset");
     try expectRefused(example ++ "\nlayer_control = 0x12 0x14\n", "more values than it takes");

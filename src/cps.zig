@@ -58,6 +58,13 @@ pub const shared1_hi = 0xf1ffff;
 pub const ram_lo = 0xff0000;
 pub const ram_hi = 0xffffff;
 
+comptime {
+    // A register file wider than its window holds registers no bus cycle can
+    // reach, and a board file naming one would be accepted and then ignored.
+    std.debug.assert(cps_a_hi - cps_a_lo + 1 == video.a_regs_bytes);
+    std.debug.assert(cps_b_hi - cps_b_lo + 1 == board.cps_b_bytes);
+}
+
 pub const ram_bytes = 0x10000;
 /// Each shared RAM window is one byte per 68000 *word* address, so it is half
 /// as many bytes as it is addresses — and the same 4 KiB the Z80 sees.
