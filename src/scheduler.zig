@@ -15,6 +15,9 @@ const std = @import("std");
 const m68k = @import("m68k");
 const cps = @import("cps");
 const video = @import("video");
+const audio = @import("audio");
+const qsound = @import("qsound");
+const soundboard = @import("soundboard");
 
 const Core = m68k.Core(cps.Cps);
 
@@ -34,9 +37,10 @@ pub const ref_per_dot = reference_hz / pixel_hz;
 pub const ref_per_line = ref_per_dot * video.dots_per_line;
 pub const ref_per_frame = ref_per_line * video.lines_per_frame;
 
-/// 7680 reference ticks a line divide by 10 exactly, so the 68000 carries no
-/// remainder from line to line and needs no debt counter of its own. QSound's
-/// 4992 does not divide evenly, and brings §3.3's debt machinery with it at M4.
+/// 7680 reference ticks a line divide by 10 and by 15 exactly, so neither CPU
+/// carries a remainder from line to line and neither needs a debt counter of
+/// its own. QSound's 4992 does not divide evenly, and brings §3.3's debt
+/// machinery with it.
 pub const cpu_per_line = ref_per_line / ref_per_cpu;
 pub const sound_per_line = ref_per_line / ref_per_sound;
 
@@ -44,6 +48,24 @@ comptime {
     std.debug.assert(ref_per_line % ref_per_cpu == 0);
     std.debug.assert(ref_per_line % ref_per_sound == 0);
 }
+
+/// The QSound chip's own crystal and the divider it runs its sample clock at:
+/// one stereo frame every 4992 reference ticks, 24.038 kHz.
+pub const qsound_hz = 60_000_000;
+pub const qsound_divider = 2496;
+pub const ref_per_sample = reference_hz / qsound_hz * qsound_divider;
+
+/// That rate as the exact fraction the mixer resamples on, rather than a
+/// rounded 24_038: the chip's rate is not a whole number of hertz, and the
+/// fraction is what stops 48 kHz output from drifting against it.
+pub const qsound_rate = audio.Rate{ .out = audio.sample_rate * qsound_divider, .in = qsound_hz };
+
+/// The sound board's Z80 takes a periodic interrupt off a divider on its own
+/// clock: 8 MHz over 32000 is 250 Hz, which is what a driver counts its
+/// envelope ticks on. Nothing on the board makes it line-synchronous, so it
+/// gets the same debt treatment as the sample clock.
+pub const sound_irq_hz = sound_hz / 32_000;
+pub const ref_per_sound_irq = reference_hz / sound_irq_hz;
 
 /// The refresh rate the picture actually runs at, as a ratio, so nothing in the
 /// emulator has to round it: 8 MHz over 134,144 dots is 59.6374 Hz.
@@ -89,6 +111,8 @@ fn runLine(c: *cps.Cps, cpu: *m68k.Cpu) void {
     const ran = cpu.cycles -% start;
     c.cpu_over = c.cpu_over + ran - cpu_per_line;
 
+    runSound(c);
+
     // Line, then interrupts: what the CPU wrote during a line is on screen for
     // that line, and an interrupt raised at the end of one is taken from the
     // start of the next.
@@ -108,10 +132,53 @@ fn runLine(c: *cps.Cps, cpu: *m68k.Cpu) void {
     Core.setIpl(cpu, level);
 }
 
-/// Fills the reset vector and puts the 68000 on it.
+/// The sound board's share of the same line: the Z80's cycles, the interrupts
+/// its divider raised while they ran, and the samples the chip finished.
+///
+/// The 68000 has already had its line by the time this runs. The two CPUs only
+/// meet in shared RAM, and a byte posted there is read a line later at worst,
+/// which is well inside what a sound driver polls at.
+fn runSound(c: *cps.Cps) void {
+    const s = &c.sound;
+
+    // A set with no sound ROM has no sound board — the in-repo test ROM is one
+    // (DESIGN.md §8.1) — and a Z80 fetching 0xff out of empty space would spend
+    // the run taking RST 38 and pushing return addresses into RAM.
+    if (s.rom.len == 0) return;
+
+    c.sound_irq_debt += ref_per_line;
+    while (c.sound_irq_debt >= ref_per_sound_irq) : (c.sound_irq_debt -= ref_per_sound_irq) {
+        s.int_pending = true;
+    }
+
+    const budget = sound_per_line -| c.sound_over;
+    const start = s.cpu.cycles;
+    while (s.cpu.cycles -% start < budget) {
+        soundboard.interrupt(s);
+        soundboard.step(s);
+    }
+    c.sound_over = c.sound_over + (s.cpu.cycles -% start) - sound_per_line;
+
+    // ponytail: the chip is sampled after the Z80 has had the whole line
+    // rather than in step with it, so a register written mid-line takes effect
+    // from the line's first sample. At 24 kHz that is 16 samples of slack on a
+    // note's start; slice it finer only if a game turns out to hear it.
+    c.sample_debt += ref_per_line;
+    while (c.sample_debt >= ref_per_sample) : (c.sample_debt -= ref_per_sample) {
+        const f = qsound.sample(&s.q);
+        c.mixer.pushNative(f.l, f.r, qsound_rate);
+    }
+}
+
+/// Fills the reset vector and puts the 68000 on it, and hands the sound board
+/// its ROM: the Kabuki key is the board's, so this is the first moment both
+/// halves of the machine are in one place.
 pub fn reset(c: *cps.Cps, cpu: *m68k.Cpu) void {
     cpu.* = .{};
     Core.reset(cpu, c);
+
+    soundboard.reset(&c.sound);
+    soundboard.load(&c.sound, c.rom.audio, c.board.kabuki);
 }
 
 /// Everything a frame can have changed, in one number: what `--frames N` prints
@@ -129,6 +196,13 @@ pub fn hash(c: *const cps.Cps, cpu: *const m68k.Cpu) u64 {
     h.update(std.mem.asBytes(&cpu.a));
     h.update(std.mem.asBytes(&cpu.pc));
     h.update(std.mem.asBytes(&cpu.cycles));
+    // The sound board is state the picture cannot show, which is the whole
+    // reason the hash is more than the framebuffer: a driver that has gone off
+    // the rails diverges here frames before anything else notices.
+    h.update(std.mem.sliceAsBytes(&c.sound.shared));
+    h.update(std.mem.sliceAsBytes(&c.sound.q.regs));
+    h.update(std.mem.asBytes(&c.sound.cpu.pc));
+    h.update(std.mem.asBytes(&c.sound.cpu.cycles));
     return h.final();
 }
 
