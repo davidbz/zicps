@@ -85,10 +85,12 @@ pub const SoundBoard = struct {
 };
 
 /// Decodes the fixed ROM into its two views and holds on to the region for the
-/// bank window. A board with no Kabuki key — the set this project builds for
-/// itself — reads the same bytes both ways.
-pub fn load(s: *SoundBoard, rom: []const u8, key: ?board.Kabuki) void {
+/// bank window, and hands the chip the sample ROM it plays out of. A board with
+/// no Kabuki key — the set this project builds for itself — reads the same
+/// bytes both ways.
+pub fn load(s: *SoundBoard, rom: []const u8, samples: []const u8, key: ?board.Kabuki) void {
     s.rom = rom;
+    qsound.attach(&s.q, samples);
     const fixed = rom[0..@min(rom.len, fixed_bytes)];
     @memset(&s.op, blank);
     @memset(&s.data, blank);
@@ -118,7 +120,7 @@ pub fn reset(s: *SoundBoard) void {
     Core.reset(&s.cpu);
     s.bank = 0;
     s.int_pending = false;
-    s.q = .{};
+    qsound.reset(&s.q);
 }
 
 // --------------------------------------------------------------------- bus
@@ -178,7 +180,7 @@ const testing = std.testing;
 /// came from, so a read landing in the wrong bank is visible.
 fn withRom(rom: []const u8) SoundBoard {
     var s = SoundBoard{};
-    load(&s, rom, null);
+    load(&s, rom, &.{}, null);
     return s;
 }
 
@@ -220,7 +222,7 @@ test "the fixed ROM answers one byte to a fetch and another to a data read" {
     rom[at] = kabuki.encodeByte(key, at, .op, 0xaa);
 
     var s = SoundBoard{};
-    load(&s, &rom, key);
+    load(&s, &rom, &.{}, key);
 
     // The cursor is where the next instruction byte is due, so this read is a
     // fetch and gets the opcode view.
@@ -232,11 +234,16 @@ test "the fixed ROM answers one byte to a fetch and another to a data read" {
     try testing.expectEqual(@as(u16, at + 1), s.fetch);
 }
 
-test "the QSound ports latch and answer ready" {
+test "the QSound ports latch, and the chip answers ready once it has run" {
     var s = SoundBoard{};
     z80Write8(&s, qsound_lo + qsound.port_data_hi, 0x01);
     z80Write8(&s, qsound_lo + qsound.port_data_lo, 0x02);
     z80Write8(&s, qsound_lo + qsound.port_reg, 0x33);
     try testing.expectEqual(@as(u16, 0x0102), s.q.regs[0x33]);
+
+    // A write leaves the chip busy, which is what the driver spins on; it
+    // answers ready again once it has finished a sample.
+    try testing.expectEqual(@as(u8, 0), z80Read8(&s, qsound_status));
+    for (0..8) |_| _ = qsound.sample(&s.q);
     try testing.expectEqual(@as(u8, qsound.ready), z80Read8(&s, qsound_status));
 }

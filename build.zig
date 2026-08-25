@@ -172,6 +172,44 @@ pub fn build(b: *std.Build) void {
     const testrom_step = b.step("testrom", "Score every page of the acceptance ROM");
     testrom_step.dependOn(&b.addRunArtifact(scoreboard).step);
 
+    // The differential check of DESIGN.md §9 M4: the same register log driven
+    // into this core and into ctr's qsound-hle, diffed sample by sample. The
+    // reference is fetched into gitignored testdata/, so it is wired up only
+    // when it is actually there and a fresh checkout stays green without it.
+    const qsound_ref = b.step("qsound-ref", "Diff the QSound core against qsound-hle");
+    const reference = "testdata/qsound-hle";
+    if (b.build_root.handle.access(b.graph.io, reference ++ "/qsound.c", .{})) |_| {
+        const ref_module = b.createModule(.{
+            .root_source_file = b.path("test/qsound_ref_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            // The reference shifts negative values on purpose (the DSP wraps,
+            // and so does its model); C calls that undefined and the default
+            // sanitiser traps it. Diffing it means running it as written.
+            .sanitize_c = .off,
+            .imports = &.{.{ .name = "qsound", .module = qsound }},
+        });
+        ref_module.addIncludePath(b.path(reference));
+        // The reference is compiled exactly as fetched, checksum and all, so
+        // the flags bend to it rather than the other way round: it is 2018 C
+        // with two missing returns and an implicit `abs`, none of which reach
+        // the code being diffed.
+        ref_module.addCSourceFile(.{
+            .file = b.path(reference ++ "/qsound.c"),
+            .flags = &.{ "-std=gnu99", "-Wno-return-type", "-Wno-implicit-function-declaration" },
+        });
+        const ref_test = b.addTest(.{ .root_module = ref_module });
+        const run_ref = b.addRunArtifact(ref_test);
+        qsound_ref.dependOn(&run_ref.step);
+        test_step.dependOn(&run_ref.step);
+        check_step.dependOn(&ref_test.step);
+    } else |_| {
+        qsound_ref.dependOn(&b.addFail(
+            "no reference to diff against: run tools/fetch_qsound_reference.sh first",
+        ).step);
+    }
+
     const modules = [_]*std.Build.Module{
         board, romset, video,  cps,        scheduler, input,      config,
         audio, kabuki, qsound, soundboard, snow,      exe_module, system_tests,
