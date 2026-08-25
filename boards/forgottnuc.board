@@ -1,0 +1,38 @@
+# Board file for MAME's `forgottnuc`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 lw11c.14f crc=0xe62742b6
+program = 0x000001 0x020000 byte16 lw15c.14g crc=0x1b70f216
+program = 0x040000 0x020000 byte16 lw10c.13f crc=0x8f5ea3f5
+program = 0x040001 0x020000 byte16 lw14c.13g crc=0x708e7472
+program = 0x080000 0x080000 word   lw-07.13e crc=0xfd252a26
+
+gfx = 0x000000 0x080000 word64 lw-01.9d crc=0x0318f298
+gfx = 0x000002 0x080000 word64 lw-08.9f crc=0x25a8e43c
+gfx = 0x000004 0x080000 word64 lw-05.9e crc=0xe4552fd7
+gfx = 0x000006 0x080000 word64 lw-12.9g crc=0x8e6a832b
+gfx = 0x200000 0x080000 word64 lw-02.12d crc=0x43e6c5c8
+gfx = 0x200002 0x080000 word64 lw-09.12f crc=0x899cb4ad
+gfx = 0x200004 0x080000 word64 lw-06.12e crc=0x5b9edffc
+gfx = 0x200006 0x080000 word64 lw-13.12g crc=0x8e058ef5
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites 0x00000 0x07fff 0
+gfx_bank = scroll1 0x00000 0x1ffff 0
+gfx_bank = stars 0x00000 0x1ffff 1
+gfx_bank = scroll2 0x00000 0x1ffff 1
+gfx_bank = scroll3 0x00000 0x1ffff 1

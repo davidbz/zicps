@@ -1,0 +1,43 @@
+# Board file for MAME's `pnickj`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 pnij_36.12f crc=0x2d4ffb2b
+program = 0x000001 0x020000 byte16 pnij_42.12h crc=0xc085dfaf
+
+gfx = 0x000000 0x020000 byte64 pnij_09.4b crc=0x48177b0a
+gfx = 0x000001 0x020000 byte64 pnij_01.4a crc=0x01a0f311
+gfx = 0x000002 0x020000 byte64 pnij_13.9b crc=0x406451b0
+gfx = 0x000003 0x020000 byte64 pnij_05.9a crc=0x8c515dc0
+gfx = 0x000004 0x020000 byte64 pnij_26.5e crc=0xe2af981e
+gfx = 0x000005 0x020000 byte64 pnij_18.5c crc=0xf17a0e56
+gfx = 0x000006 0x020000 byte64 pnij_38.8h crc=0xeb75bd8c
+gfx = 0x000007 0x020000 byte64 pnij_32.8f crc=0x84560bef
+gfx = 0x100000 0x020000 byte64 pnij_10.5b crc=0xc2acc171
+gfx = 0x100001 0x020000 byte64 pnij_02.5a crc=0x0e21fc33
+gfx = 0x100002 0x020000 byte64 pnij_14.10b crc=0x7fe59b19
+gfx = 0x100003 0x020000 byte64 pnij_06.10a crc=0x79f4bfe3
+gfx = 0x100004 0x020000 byte64 pnij_27.7e crc=0x83d5cb0e
+gfx = 0x100005 0x020000 byte64 pnij_19.7c crc=0xaf08b230
+gfx = 0x100006 0x020000 byte64 pnij_39.9h crc=0x70fbe579
+gfx = 0x100007 0x020000 byte64 pnij_33.9f crc=0x3ed2c680
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x8000 0x0 0x0 0x0
+gfx_bank = scroll1 0x00000 0x00fff 0
+gfx_bank = sprites|scroll2 0x01000 0x05fff 0
+gfx_bank = scroll3 0x06000 0x07fff 0

@@ -1,0 +1,61 @@
+# Board file for MAME's `sf2ceblp`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 1k.31.e13 crc=0xea78f9b4
+program = 0x000001 0x020000 byte16 se.36.j13 crc=0xd30c263e
+program = 0x040000 0x020000 byte16 0e.30.e11 crc=0x005b54cc
+program = 0x040001 0x020000 byte16 de.35.j11 crc=0xc184d26d
+program = 0x080000 0x020000 byte16 bk.29.e10 crc=0x524f5c55
+program = 0x080001 0x020000 byte16 ff.34.j10 crc=0xf06a12f2
+program = 0x0c0000 0x040000 byte16 8k.28.e9 crc=0xb7ad5214
+program = 0x0c0001 0x040000 byte16 tf.33.j9 crc=0x6340b914
+
+gfx = 0x000000 0x040000 byte64 24.e7 crc=0xa8b5633a
+gfx = 0x000001 0x040000 byte64 14.c7 crc=0x5db24ca7
+gfx = 0x000002 0x040000 byte64 26.e9 crc=0x82e8e384
+gfx = 0x000003 0x040000 byte64 16.c9 crc=0x1fd98ad0
+gfx = 0x000004 0x040000 byte64 20.e3 crc=0x8d5d0045
+gfx = 0x000005 0x040000 byte64 10.c3 crc=0xeb48f7f2
+gfx = 0x000006 0x040000 byte64 22.e5 crc=0x4109d637
+gfx = 0x000007 0x040000 byte64 12.c5 crc=0x5d21d8b3
+gfx = 0x200000 0x040000 byte64 25.e8 crc=0x72e923df
+gfx = 0x200001 0x040000 byte64 15.c8 crc=0x9a96be48
+gfx = 0x200002 0x040000 byte64 27.e10 crc=0x4a3a8d09
+gfx = 0x200003 0x040000 byte64 17.c10 crc=0xa917a922
+gfx = 0x200004 0x040000 byte64 21.e4 crc=0x55c2b455
+gfx = 0x200005 0x040000 byte64 11.c4 crc=0xff36859e
+gfx = 0x200006 0x040000 byte64 23.e6 crc=0xef9c2d4d
+gfx = 0x200007 0x040000 byte64 13.c6 crc=0xbc937c96
+gfx = 0x400000 0x040000 byte64 6.a8 crc=0x023baa18
+gfx = 0x400001 0x040000 byte64 5.a7 crc=0xa6ad6ef3
+gfx = 0x400002 0x040000 byte64 8.a10 crc=0x26fb340c
+gfx = 0x400003 0x040000 byte64 7.a9 crc=0xf56085ba
+gfx = 0x400004 0x040000 byte64 1.a3 crc=0x877b2b18
+gfx = 0x400005 0x040000 byte64 2.a4 crc=0x144aa4c9
+gfx = 0x400006 0x040000 byte64 4.a6 crc=0xf2c400b4
+gfx = 0x400007 0x040000 byte64 3.a5 crc=0x8053335d
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+in2             = 0x36
+
+bank_sizes = 0x8000 0x8000 0x8000 0x0
+gfx_bank = sprites 0x00000 0x07fff 0
+gfx_bank = sprites 0x08000 0x0ffff 1
+gfx_bank = sprites 0x10000 0x11fff 2
+gfx_bank = scroll3 0x02000 0x03fff 2
+gfx_bank = scroll1 0x04000 0x04fff 2
+gfx_bank = scroll2 0x05000 0x07fff 2

@@ -1,0 +1,42 @@
+# Board file for MAME's `captcommu`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   ccu_23b.8f crc=0x03da44fd
+program = 0x080000 0x080000 word   ccu_22c.7f crc=0x9b82a052
+program = 0x100000 0x020000 byte16 ccu_24b.9e crc=0x84ff99b2
+program = 0x100001 0x020000 byte16 ccu_28b.9f crc=0xfbcec223
+
+gfx = 0x000000 0x080000 word64 cc-5m.3a crc=0x7261d8ba
+gfx = 0x000002 0x080000 word64 cc-7m.5a crc=0x6a60f949
+gfx = 0x000004 0x080000 word64 cc-1m.4a crc=0x00637302
+gfx = 0x000006 0x080000 word64 cc-3m.6a crc=0xcc87cf61
+gfx = 0x200000 0x080000 word64 cc-6m.7a crc=0x28718bed
+gfx = 0x200002 0x080000 word64 cc-8m.9a crc=0xd4acc53a
+gfx = 0x200004 0x080000 word64 cc-2m.8a crc=0x0c69f151
+gfx = 0x200006 0x080000 word64 cc-4m.10a crc=0x1f9ebb97
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x20
+priority        = 0x2e 0x2c 0x2a 0x28
+palette_control = 0x30
+layer_enable    = 0x20 0x12 0x12 0x00 0x00
+multiply        = 0x06 0x04 0x02 0x00
+in2             = 0x36
+in3             = 0x38
+out2            = 0x34
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites 0x00000 0x07fff 0
+gfx_bank = scroll2 0x00000 0x07fff 0
+gfx_bank = sprites 0x08000 0x0ffff 1
+gfx_bank = scroll1 0x08000 0x0ffff 1
+gfx_bank = scroll2 0x08000 0x0ffff 1
+gfx_bank = scroll3 0x08000 0x0ffff 1

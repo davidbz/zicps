@@ -1,0 +1,52 @@
+# Board file for MAME's `cawingu`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 cau_36.12f crc=0xc2574c0c
+program = 0x000001 0x020000 byte16 cau_42.12h crc=0xd89e00be
+program = 0x040000 0x020000 byte16 cau_37.13f crc=0x8e6d4f8a
+program = 0x040001 0x020000 byte16 cau_43.13h crc=0xece07955
+program = 0x080000 0x020000 byte16 cau_34.10f crc=0x5fda906e
+program = 0x080001 0x020000 byte16 cau_40.10h crc=0x736c1835
+program = 0x0c0000 0x020000 byte16 cau_35.11f crc=0x74c2ddf0
+program = 0x0c0001 0x020000 byte16 cau_41.11h crc=0x2a44bfe5
+
+gfx = 0x000000 0x020000 byte64 cau_09.4b crc=0xd4b17c3a
+gfx = 0x000001 0x020000 byte64 cau_01.4a crc=0x34c3094e
+gfx = 0x000002 0x020000 byte64 cau_13.9b crc=0x9d5c7911
+gfx = 0x000003 0x020000 byte64 cau_05.9a crc=0xf042cc7b
+gfx = 0x000004 0x020000 byte64 cau_24.5e crc=0x0eac450f
+gfx = 0x000005 0x020000 byte64 cau_17.5c crc=0x4fab0d0c
+gfx = 0x000006 0x020000 byte64 cau_38.8h crc=0xcb96ed24
+gfx = 0x000007 0x020000 byte64 cau_32.8f crc=0x433a0859
+gfx = 0x100000 0x020000 byte64 cau_10.5b crc=0x4af10ef2
+gfx = 0x100001 0x020000 byte64 cau_02.5a crc=0x3e1f5b34
+gfx = 0x100002 0x020000 byte64 cau_14.10b crc=0x2bef78c4
+gfx = 0x100003 0x020000 byte64 cau_06.10a crc=0x3777ede1
+gfx = 0x100004 0x020000 byte64 cau_25.7e crc=0x859ee531
+gfx = 0x100005 0x020000 byte64 cau_18.7c crc=0x4c52edf1
+gfx = 0x100006 0x020000 byte64 cau_39.9h crc=0x147be975
+gfx = 0x100007 0x020000 byte64 cau_33.9f crc=0x8560c130
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x28
+priority        = 0x2a 0x2c 0x2e 0x30
+palette_control = 0x32
+layer_enable    = 0x02 0x08 0x20 0x14 0x14
+id              = 0x20 0x0005
+
+bank_sizes = 0x4000 0x4000 0x0 0x0
+gfx_bank = sprites 0x00000 0x02fff 0
+gfx_bank = scroll2 0x00000 0x02fff 0
+gfx_bank = scroll3 0x03000 0x03fff 0
+gfx_bank = scroll3 0x04000 0x04fff 1
+gfx_bank = scroll1 0x05000 0x057ff 1
+gfx_bank = sprites 0x05800 0x07fff 1
+gfx_bank = scroll2 0x05800 0x07fff 1

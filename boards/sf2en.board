@@ -1,0 +1,60 @@
+# Board file for MAME's `sf2en`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 epr-b-05.12f crc=0xbc02c14c
+program = 0x000001 0x020000 byte16 epr-b-09.12h crc=0x1c1266b3
+program = 0x040000 0x020000 byte16 epr-b-06.13f crc=0x8b8221e6
+program = 0x040001 0x020000 byte16 epr-b-10.13h crc=0x2d42d82a
+program = 0x080000 0x020000 byte16 epr-b-03.10f crc=0x852e10ec
+program = 0x080001 0x020000 byte16 epr-b-07.10h crc=0x3b075de1
+program = 0x0c0000 0x020000 byte16 epr-b-04.11f crc=0xfdd0b5c1
+program = 0x0c0001 0x020000 byte16 epr-b-08.11h crc=0xdb66b127
+
+gfx = 0x000000 0x040000 byte64 epr-b-18.5e crc=0x88f3485a
+gfx = 0x000001 0x040000 byte64 epr-b-13.5c crc=0x63d63e0c
+gfx = 0x000002 0x040000 byte64 epr-b-24.8h crc=0x25ae23bc
+gfx = 0x000003 0x040000 byte64 epr-b-23.8f crc=0xe5819676
+gfx = 0x000004 0x040000 byte64 epr-b-07.4b crc=0x84afb959
+gfx = 0x000005 0x040000 byte64 epr-b-01.4a crc=0xab21635d
+gfx = 0x000006 0x040000 byte64 epr-b-10.9b crc=0x2ce56f9f
+gfx = 0x000007 0x040000 byte64 epr-b-04.9a crc=0x0ad7fb2b
+gfx = 0x200000 0x040000 byte64 epr-b-19.8e crc=0x031525cc
+gfx = 0x200001 0x040000 byte64 epr-b-14.8c crc=0xc97046a5
+gfx = 0x200002 0x040000 byte64 epr-b-21.10e crc=0xacbbdb09
+gfx = 0x200003 0x040000 byte64 epr-b-16.10c crc=0xfa6f32d9
+gfx = 0x200004 0x040000 byte64 epr-b-08.7b crc=0x14756473
+gfx = 0x200005 0x040000 byte64 epr-b-02.7a crc=0xee3d878a
+gfx = 0x200006 0x040000 byte64 epr-b-11.11b crc=0xdbbfd400
+gfx = 0x200007 0x040000 byte64 epr-b-05.11a crc=0x37635e97
+gfx = 0x400000 0x040000 byte64 epr-b-20.9e crc=0x27cae573
+gfx = 0x400001 0x040000 byte64 epr-b-15.9c crc=0x14e46ab1
+gfx = 0x400002 0x040000 byte64 epr-b-22.11e crc=0xf241f0c7
+gfx = 0x400003 0x040000 byte64 epr-b-17.11c crc=0xf187086b
+gfx = 0x400004 0x040000 byte64 epr-b-09.8b crc=0x4894aa8f
+gfx = 0x400005 0x040000 byte64 epr-b-03.8a crc=0xe8877e9d
+gfx = 0x400006 0x040000 byte64 epr-b-12.12b crc=0xc9d4ed76
+gfx = 0x400007 0x040000 byte64 epr-b-06.12a crc=0x67dcc295
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x14
+priority        = 0x12 0x10 0x0e 0x0c
+palette_control = 0x0a
+layer_enable    = 0x08 0x14 0x02 0x00 0x00
+id              = 0x08 0x0407
+in2             = 0x36
+
+bank_sizes = 0x8000 0x8000 0x8000 0x0
+gfx_bank = sprites 0x00000 0x07fff 0
+gfx_bank = sprites 0x08000 0x0ffff 1
+gfx_bank = sprites 0x10000 0x11fff 2
+gfx_bank = scroll3 0x02000 0x03fff 2
+gfx_bank = scroll1 0x04000 0x04fff 2
+gfx_bank = scroll2 0x05000 0x07fff 2

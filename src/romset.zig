@@ -75,12 +75,13 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
     defer gpa.free(packed_gfx);
 
     for (b.romList()) |rom| {
-        const bytes = try src.read(rom.name);
+        const bytes = try src.read(rom);
         defer gpa.free(bytes);
 
         const want = @as(u64, rom.src) + rom.len;
         if (bytes.len < want)
             return fail(diag, "{s} is 0x{x} bytes, but the board file reads 0x{x} from it", .{ rom.name, bytes.len, want });
+        try verify(rom, bytes, diag);
 
         const region = switch (rom.region) {
             .program => program,
@@ -96,6 +97,16 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
     decode(packed_gfx, gfx);
 
     return .{ .program = program, .gfx = gfx, .audio = audio, .qsound = qsound };
+}
+
+/// A board file that names the dump it was written against is checked against
+/// the dump that turned up. The CRC covers the whole file, as MAME's does, so a
+/// chip loaded in two pieces is checked twice rather than by halves.
+fn verify(rom: board.Rom, bytes: []const u8, diag: *Diag) Error!void {
+    const want = rom.crc orelse return;
+    const got = std.hash.Crc32.hash(bytes);
+    if (got == want) return;
+    return fail(diag, "{s} has crc {x:0>8}, and this board file was written for {x:0>8}: this is a different set", .{ rom.name, got, want });
 }
 
 fn cap(sizes: *[board.region_count]u64, diag: *Diag) Error!void {
@@ -130,6 +141,11 @@ fn place(region: []u8, rom: board.Rom, bytes: []const u8) void {
         // other way round.
         .word => for (bytes, 0..) |byte, i| {
             region[rom.dest + (i ^ 1)] = byte;
+        },
+        // Half of a 16-bit pair, already in the order the 68000 reads: the chip
+        // on the even addresses holds the high byte of every word.
+        .byte16 => for (bytes, 0..) |byte, i| {
+            region[rom.dest + i * 2] = byte;
         },
         .word64 => for (bytes, 0..) |byte, i| {
             region[rom.dest + (i / 2) * 8 + (i & 1)] = byte;
@@ -190,31 +206,43 @@ const Source = struct {
         if (s.zip) |f| f.close(s.io) else s.dir.close(s.io);
     }
 
-    fn read(s: *Source, name: []const u8) Error![]u8 {
-        if (s.zip != null) return s.readZip(name);
-        return s.dir.readFileAlloc(s.io, name, s.gpa, .limited(max_file)) catch |err|
-            fail(s.diag, "cannot read {s}: {t}", .{ name, err });
+    fn read(s: *Source, rom: board.Rom) Error![]u8 {
+        if (s.zip != null) return s.readZip(rom);
+        return s.dir.readFileAlloc(s.io, rom.name, s.gpa, .limited(max_file)) catch |err|
+            fail(s.diag, "cannot read {s}: {t}", .{ rom.name, err });
     }
 
     /// ponytail: rescans the central directory once per file. A set is a dozen
     /// files loaded once, so the quadratic scan is cheaper than a name index.
-    fn readZip(s: *Source, name: []const u8) Error![]u8 {
+    fn readZip(s: *Source, rom: board.Rom) Error![]u8 {
         var window: [4096]u8 = undefined;
         var fr = s.zip.?.reader(s.io, &window);
         var it = std.zip.Iterator.init(&fr) catch |err|
             return fail(s.diag, "cannot read the set as a zip: {t}", .{err});
 
         var found: [max_name]u8 = undefined;
+        var same_chip: ?std.zip.Iterator.Entry = null;
         while (it.next() catch |err| return fail(s.diag, "the zip's directory is damaged: {t}", .{err})) |entry| {
             if (entry.filename_len > found.len) continue;
             const in_zip = found[0..entry.filename_len];
             try seek(&fr, entry.header_zip_offset + @sizeOf(std.zip.CentralDirectoryFileHeader), s.diag);
             fr.interface.readSliceAll(in_zip) catch |err|
                 return fail(s.diag, "the zip's directory is damaged: {t}", .{err});
-            if (!std.ascii.eqlIgnoreCase(std.fs.path.basename(in_zip), name)) continue;
-            return s.extract(&fr, entry, name);
+            // A set zipped before MAME last renamed its dumps holds the right
+            // chips under the wrong names. A zip records what each entry
+            // hashes to, and a board file that names a CRC knows which chip it
+            // wants, so the second is found by what it is rather than what it
+            // is called. MAME does the same with the same numbers.
+            if (rom.crc) |want| {
+                if (same_chip == null and entry.crc32 == want) same_chip = entry;
+            }
+            if (!std.ascii.eqlIgnoreCase(std.fs.path.basename(in_zip), rom.name)) continue;
+            return s.extract(&fr, entry, rom.name);
         }
-        return fail(s.diag, "{s} is not in the set", .{name});
+        if (same_chip) |entry| return s.extract(&fr, entry, rom.name);
+        if (rom.crc) |want|
+            return fail(s.diag, "the set has no {s}, and nothing in it has crc {x:0>8} either", .{ rom.name, want });
+        return fail(s.diag, "{s} is not in the set", .{rom.name});
     }
 
     fn extract(s: *Source, fr: *std.Io.File.Reader, entry: std.zip.Iterator.Entry, name: []const u8) Error![]u8 {
@@ -303,12 +331,18 @@ test "a row of graphics comes out of four planes, high bit last" {
     try testing.expectEqualSlices(u8, &@as([pixels_per_row]u8, @splat(0)), &dst);
 }
 
-test "the four load modes put a file where its chip sits" {
+test "every load mode puts a file where its chip sits" {
     const file = [_]u8{ 0x11, 0x22, 0x33, 0x44 };
     var region: [32]u8 = @splat(0);
 
     place(&region, .{ .region = .program, .dest = 0, .len = 4, .mode = .word, .src = 0, .name = "" }, &file);
     try testing.expectEqualSlices(u8, &.{ 0x22, 0x11, 0x44, 0x33 }, region[0..4]);
+
+    // The odd half of a 16-bit pair: every other byte, and no swap, because the
+    // chip is already on the addresses it belongs to.
+    @memset(&region, 0);
+    place(&region, .{ .region = .program, .dest = 1, .len = 4, .mode = .byte16, .src = 0, .name = "" }, &file);
+    try testing.expectEqualSlices(u8, &.{ 0, 0x11, 0, 0x22, 0, 0x33, 0, 0x44 }, region[0..8]);
 
     @memset(&region, 0);
     place(&region, .{ .region = .gfx, .dest = 2, .len = 4, .mode = .word64, .src = 0, .name = "" }, &file);
@@ -418,6 +452,34 @@ test "a set that does not add up is refused by name" {
     try tmp.dir.deleteFile(testing.io, "g3.bin");
     try testing.expectError(error.BadRomSet, load(testing.allocator, testing.io, tmp.parent_dir, &tmp.sub_path, &b, &diag));
     try testing.expect(std.mem.indexOf(u8, diag.message(), "g3.bin") != null);
+}
+
+test "a set under the right name that is not the right dump is refused" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeTinySet(tmp.dir);
+
+    var chip: [0x10]u8 = undefined;
+    const dump = std.hash.Crc32.hash(tinyChip(0, &chip));
+    var text: [tiny_board.len + 80]u8 = undefined;
+    var diag = board.Diag{};
+
+    // The same file loaded a second time, under the CRC of a dump that is not
+    // the one on disk: this is what a shipped board file meeting the wrong set
+    // looks like.
+    const wrong = try std.fmt.bufPrint(&text, "{s}\nprogram = 0x20 0x10 word even.bin crc=0x{x:0>8}\n", .{ tiny_board, dump +% 1 });
+    const off = try board.parse(wrong, &diag);
+    try testing.expectError(error.BadRomSet, load(testing.allocator, testing.io, tmp.parent_dir, &tmp.sub_path, &off, &diag));
+    try testing.expect(std.mem.indexOf(u8, diag.message(), "even.bin") != null);
+    try testing.expect(std.mem.indexOf(u8, diag.message(), "different set") != null);
+
+    const right = try std.fmt.bufPrint(&text, "{s}\nprogram = 0x20 0x10 word even.bin crc=0x{x:0>8}\n", .{ tiny_board, dump });
+    const b = try board.parse(right, &diag);
+    var set = load(testing.allocator, testing.io, tmp.parent_dir, &tmp.sub_path, &b, &diag) catch {
+        std.debug.print("unexpected: {s}\n", .{diag.message()});
+        return error.TestUnexpectedResult;
+    };
+    set.deinit(testing.allocator);
 }
 
 test "a board file asking for more than a board can hold is refused" {

@@ -1,0 +1,39 @@
+# Board file for MAME's `knightsj`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   kr_23j.8f crc=0xeae7417f
+program = 0x080000 0x080000 word   kr_22.7f crc=0xd0b671a9
+
+gfx = 0x000000 0x080000 word64 kr_01.3a crc=0x9e36c1a4
+gfx = 0x000002 0x080000 word64 kr_02.4a crc=0xc5832cae
+gfx = 0x000004 0x080000 word64 kr_03.5a crc=0xf095be2d
+gfx = 0x000006 0x080000 word64 kr_04.6a crc=0x179dfd96
+gfx = 0x200000 0x080000 word64 kr_05.7a crc=0x1f4298d2
+gfx = 0x200002 0x080000 word64 kr_06.8a crc=0x37fa8751
+gfx = 0x200004 0x080000 word64 kr_07.9a crc=0x0200bc3d
+gfx = 0x200006 0x080000 word64 kr_08.10a crc=0x0bb2b4e7
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x28
+priority        = 0x26 0x24 0x22 0x20
+palette_control = 0x30
+layer_enable    = 0x20 0x10 0x02 0x00 0x00
+multiply        = 0x06 0x04 0x02 0x00
+in2             = 0x36
+out2            = 0x34
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites 0x00000 0x07fff 0
+gfx_bank = scroll2 0x00000 0x07fff 0
+gfx_bank = scroll1 0x08000 0x09fff 1
+gfx_bank = sprites 0x08000 0x0cfff 1
+gfx_bank = scroll2 0x08000 0x0cfff 1
+gfx_bank = scroll3 0x0d000 0x0ffff 1

@@ -1,0 +1,46 @@
+# Board file for MAME's `sfzch`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   sfzch23 crc=0x1140743f
+program = 0x080000 0x080000 word   sfza22 crc=0x8d9b2480
+program = 0x100000 0x080000 word   sfzch21 crc=0x5435225d
+program = 0x180000 0x080000 word   sfza20 crc=0x806e8f38
+
+gfx = 0x000000 0x080000 word64 sfz_01.3a crc=0x0dd53e62
+gfx = 0x000002 0x080000 word64 sfz_02.4a crc=0x94c31e3f
+gfx = 0x000004 0x080000 word64 sfz_03.5a crc=0x9584ac85
+gfx = 0x000006 0x080000 word64 sfz_04.6a crc=0xb983624c
+gfx = 0x200000 0x080000 word64 sfz_05.7a crc=0x2b47b645
+gfx = 0x200002 0x080000 word64 sfz_06.8a crc=0x74fd9fb1
+gfx = 0x200004 0x080000 word64 sfz_07.9a crc=0xbb2c734d
+gfx = 0x200006 0x080000 word64 sfz_08.10a crc=0x454f7868
+gfx = 0x400000 0x080000 word64 sfz_10.3c crc=0x2a7d675e
+gfx = 0x400002 0x080000 word64 sfz_11.4c crc=0xe35546c8
+gfx = 0x400004 0x080000 word64 sfz_12.5c crc=0xf122693a
+gfx = 0x400006 0x080000 word64 sfz_13.6c crc=0x7cf942c8
+gfx = 0x600000 0x080000 word64 sfz_14.7c crc=0x09038c81
+gfx = 0x600002 0x080000 word64 sfz_15.8c crc=0x1aa17391
+gfx = 0x600004 0x080000 word64 sfz_16.9c crc=0x19a5abd6
+gfx = 0x600006 0x080000 word64 sfz_17.10c crc=0x248b3b73
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x8000 0x8000 0x8000 0x8000
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x08000 0x0ffff 1
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x10000 0x17fff 2
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x18000 0x1ffff 3

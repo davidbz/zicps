@@ -1,0 +1,32 @@
+# Board file for MAME's `qadjr`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   qad_23a.8f crc=0x4d3553de
+program = 0x080000 0x080000 word   qad_22a.7f crc=0x3191ddd0
+
+gfx = 0x000000 0x080000 word64 qad_01.3a crc=0x9d853b57
+gfx = 0x000002 0x080000 word64 qad_02.4a crc=0xb35976c4
+gfx = 0x000004 0x080000 word64 qad_03.5a crc=0xcea4ca8c
+gfx = 0x000006 0x080000 word64 qad_04.6a crc=0x41b74d1b
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+in2             = 0x36
+in3             = 0x38
+out2            = 0x34
+
+bank_sizes = 0x8000 0x0 0x0 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0

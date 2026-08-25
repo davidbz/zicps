@@ -66,6 +66,10 @@ pub const Mode = enum {
     /// A 16-bit program ROM. The file holds each word low byte first and the
     /// 68000 reads big-endian, so every pair is swapped on the way in.
     word,
+    /// Half of a 16-bit pair: one byte of every two, in the file's own order.
+    /// The even addresses of a 68000 region are its high bytes, so a chip that
+    /// starts on one needs no swap.
+    byte16,
     /// One of four graphics chips: two bytes of every eight.
     word64,
     /// One of eight graphics chips: one byte of every eight.
@@ -78,6 +82,7 @@ pub const Mode = enum {
         const d: u64 = dest;
         return switch (m) {
             .byte, .word => d + len,
+            .byte16 => d + (len - 1) * 2 + 1,
             .word64 => d + (len / 2 - 1) * 8 + 2,
             .byte64 => d + (len - 1) * 8 + 1,
         };
@@ -94,6 +99,10 @@ pub const Rom = struct {
     /// Offset within the file to start at, for a chip that lands in two pieces
     /// (MAME's `ROM_CONTINUE`).
     src: u32,
+    /// The CRC32 of the whole file, when the board file names one: a board that
+    /// came with this build knows which dump it was written against, and a set
+    /// under the right name that is not that dump is refused rather than drawn.
+    crc: ?u32 = null,
     /// Points into the board file text, which the caller keeps for the load.
     name: []const u8,
 };
@@ -203,6 +212,10 @@ const Key = enum {
 pub fn parse(text: []const u8, diag: *Diag) Error!Board {
     var b = Board{};
     var seen_version = false;
+    // A board whose PAL decodes no priority mask at all writes the line out as
+    // four `none`s, and a board file that forgot the line has not. The values
+    // cannot tell those apart, so the line is remembered rather than read back.
+    var seen_priority = false;
 
     var line_no: u32 = 0;
     var lines = std.mem.splitAny(u8, text, "\r\n");
@@ -228,8 +241,9 @@ pub fn parse(text: []const u8, diag: *Diag) Error!Board {
                     seen_version = true;
                 },
                 .layer_control => b.layer_control = try reg(&vals, key, line_no, diag),
-                .priority => for (&b.priority) |*p| {
-                    p.* = try reg(&vals, key, line_no, diag);
+                .priority => {
+                    for (&b.priority) |*p| p.* = try reg(&vals, key, line_no, diag);
+                    seen_priority = true;
                 },
                 .palette_control => b.palette_control = try reg(&vals, key, line_no, diag),
                 .id => {
@@ -273,16 +287,18 @@ pub fn parse(text: []const u8, diag: *Diag) Error!Board {
     }
 
     if (!seen_version) return diag.say("no `version` line: this does not look like a board file", .{});
-    try require(&b, diag);
+    try require(&b, seen_priority, diag);
     return b;
 }
 
 /// The keys without which the machine cannot be built at all. Named together
 /// rather than one per run, so a hand-written file is finished in one pass.
-fn require(b: *const Board, diag: *Diag) Error!void {
+fn require(b: *const Board, seen_priority: bool, diag: *Diag) Error!void {
     const needed = [_]struct { []const u8, bool }{
         .{ "layer_control", b.layer_control != null },
-        .{ "priority", std.mem.indexOfScalar(Reg, &b.priority, null) == null },
+        // Present, not populated: a board whose PAL decodes none of the four
+        // priority masks draws every tile flat, and there are real ones.
+        .{ "priority", seen_priority },
         .{ "palette_control", b.palette_control != null },
         // Not one mask each — a board with no starfields really does have two
         // zeroes — but all five zero means nothing would ever be drawn.
@@ -359,16 +375,33 @@ fn addRom(b: *Board, region: Region, vals: *Tokens, line_no: u32, diag: *Diag) E
     if (mode == .word64 and len % 2 != 0)
         return diag.say("line {d}: {s} is loaded two bytes at a time but its length (0x{x}) is odd", .{ line_no, name, len });
 
-    b.roms[b.rom_count] = .{
+    var rom = Rom{
         .region = region,
         .dest = dest,
         .len = len,
         .mode = mode,
-        .src = if (vals.peek() != null) try int(u32, vals, key, line_no, diag) else 0,
+        .src = 0,
         .name = name,
     };
+    // What follows the file name is a file offset, a CRC, both, or neither, and
+    // a board file written by hand has neither.
+    var saw_src = false;
+    while (vals.next()) |extra| {
+        if (std.mem.startsWith(u8, extra, crc_prefix)) {
+            rom.crc = try num(u32, extra[crc_prefix.len..], key, line_no, diag);
+            continue;
+        }
+        if (saw_src)
+            return diag.say("line {d}: `{s}` has more values than it takes, starting at `{s}`", .{ line_no, key, extra });
+        rom.src = try num(u32, extra, key, line_no, diag);
+        saw_src = true;
+    }
+
+    b.roms[b.rom_count] = rom;
     b.rom_count += 1;
 }
+
+const crc_prefix = "crc=";
 
 const Tokens = std.mem.TokenIterator(u8, .any);
 
@@ -399,6 +432,10 @@ fn reg(vals: *Tokens, key: []const u8, line_no: u32, diag: *Diag) Error!Reg {
 fn int(comptime T: type, vals: *Tokens, key: []const u8, line_no: u32, diag: *Diag) Error!T {
     const text = vals.next() orelse
         return diag.say("line {d}: `{s}` needs another value", .{ line_no, key });
+    return num(T, text, key, line_no, diag);
+}
+
+fn num(comptime T: type, text: []const u8, key: []const u8, line_no: u32, diag: *Diag) Error!T {
     return std.fmt.parseInt(T, text, 0) catch
         return diag.say("line {d}: `{s}` cannot read `{s}` as a number that fits {s}", .{ line_no, key, text, @typeName(T) });
 }
@@ -428,7 +465,7 @@ const example =
     \\
     \\kabuki = 0x76543210 0x24601357 0x4343 0x43
     \\
-    \\program = 0x000000 0x80000 word   cde_23a.8f
+    \\program = 0x000000 0x80000 word   cde_23a.8f crc=0x8f4e585e
     \\program = 0x080000 0x80000 word   cde_22a.7f
     \\gfx     = 0x000000 0x80000 word64 cd-1m.3a
     \\gfx     = 0x000002 0x80000 word64 cd-3m.5a
@@ -478,6 +515,29 @@ test "a whole board file parses into the battery's contents" {
     // The second half of a chip that lands in two pieces keeps its file offset.
     try testing.expectEqual(@as(u32, 0x8000), b.roms[5].src);
     try testing.expectEqual(Mode.word64, b.roms[2].mode);
+    // A CRC is the dump this board was written against; a line without one is
+    // taken on trust, which is what a hand-written file gets.
+    try testing.expectEqual(@as(?u32, 0x8f4e585e), b.roms[0].crc);
+    try testing.expectEqual(@as(?u32, null), b.roms[1].crc);
+}
+
+test "a file offset and a CRC follow the file name in either order" {
+    var diag = Diag{};
+    const b = try parse(example ++
+        "\naudio = 0x10000 0x18000 byte q.5k crc=0x605fdb0b 0x8000" ++
+        "\nqsound = 0x0 0x80000 byte s.1k 0x40 crc=0x11223344\n", &diag);
+    const with_crc_first = b.roms[b.rom_count - 2];
+    try testing.expectEqual(@as(u32, 0x8000), with_crc_first.src);
+    try testing.expectEqual(@as(?u32, 0x605fdb0b), with_crc_first.crc);
+    const with_offset_first = b.roms[b.rom_count - 1];
+    try testing.expectEqual(@as(u32, 0x40), with_offset_first.src);
+    try testing.expectEqual(@as(?u32, 0x11223344), with_offset_first.crc);
+}
+
+test "an interleaved chip reaches its own last byte and no further" {
+    // One byte of every two, so a 4-byte chip at 0 covers 0, 2, 4 and 6.
+    try testing.expectEqual(@as(u64, 7), Mode.byte16.extent(0, 4));
+    try testing.expectEqual(@as(u64, 8), Mode.byte16.extent(1, 4));
 }
 
 fn expectRefused(text: []const u8, wanted: []const u8) !void {
@@ -506,6 +566,8 @@ test "a board file that is wrong says what is wrong with it" {
     try expectRefused(example ++ "\nprogram = 0x0 0x1000 nibble x.bin\n", "not a load mode");
     try expectRefused(example ++ "\nprogram = 0x0 0x1001 word x.bin\n", "length (0x1001) is odd");
     try expectRefused(example ++ "\nprogram = 0x0 0x0 byte x.bin\n", "with nothing");
+    try expectRefused(example ++ "\nprogram = 0x0 0x100 word x.bin crc=zz\n", "`zz`");
+    try expectRefused(example ++ "\nprogram = 0x0 0x100 word x.bin 0x10 0x20\n", "more values than it takes");
 }
 
 test "a board file missing what the machine needs names all of it at once" {

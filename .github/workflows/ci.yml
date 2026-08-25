@@ -23,7 +23,7 @@ jobs:
         with:
           version: "0.16.0"
       - name: Check formatting
-        run: zig fmt --check src/ test/ build.zig
+        run: zig fmt --check src/ test/ tools/ boards/list.zig build.zig
 
   lint-actions:
     name: Lint workflows
@@ -68,12 +68,13 @@ jobs:
           restore-keys: |
             zig-${{ runner.os }}-${{ matrix.zig }}-
             zig-${{ runner.os }}-
-      # The QSound reference is the only thing CI fetches, and the only suite
-      # that skips itself when its data is missing (DESIGN.md §9 M4), so it
-      # runs ahead of `check`: a fetch that ran late would be a green build
+      # The QSound reference is the only thing this job fetches, and the only
+      # suite that skips itself when its data is missing (DESIGN.md §9 M4), so
+      # it runs ahead of `check`: a fetch that ran late would be a green build
       # that tested less than it looks. The video milestones score against an
       # acceptance ROM that is not fetched at all — test/system_test.zig
-      # assembles it — so there has never been a second fetch to put here.
+      # assembles it. The other fetched tree, MAME's CPS-1 driver, has a job of
+      # its own below, because nothing in this one reads it.
       - name: Fetch the QSound differential reference
         shell: bash
         run: ./tools/fetch_qsound_reference.sh
@@ -81,6 +82,29 @@ jobs:
         run: zig build check
       - name: Run tests
         run: zig build test
+
+  # boards/ is generated and committed (DESIGN.md §8.1), which is only safe if
+  # something re-derives it. This fetches the MAME tree the generator reads —
+  # pinned to a commit, checksummed by the script — regenerates every board
+  # file, and fails on any difference. A hand-edit to a board file, a generator
+  # change nobody re-ran, or a bumped MAME pin whose tables moved all show up
+  # here as a diff rather than as a set that draws wrong for a user.
+  boards:
+    name: Board library
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: "0.16.0"
+      - name: Fetch MAME's CPS-1 driver
+        shell: bash
+        run: ./tools/fetch_mame_source.sh
+      - name: Regenerate the board library
+        run: zig build boards -- testdata/mame
+      - name: Check the board library is what the generator writes
+        run: git diff --exit-code -- boards/
 
   # zigesis ran Nemesis' VDPFIFOTesting as a second job here, pinning a score
   # per page and failing when one moved in either direction. Its analogue needs

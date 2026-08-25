@@ -1,0 +1,66 @@
+# Board file for MAME's `dynwarj`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 36.12f crc=0x1a516657
+program = 0x000001 0x020000 byte16 42.12h crc=0x12a290a0
+program = 0x040000 0x020000 byte16 37.13f crc=0x932fc943
+program = 0x040001 0x020000 byte16 43.13h crc=0x872ad76d
+program = 0x080000 0x020000 byte16 34.10f crc=0x8f663d00
+program = 0x080001 0x020000 byte16 40.10h crc=0x1586dbf3
+program = 0x0c0000 0x020000 byte16 35.11f crc=0x9db93d7a
+program = 0x0c0001 0x020000 byte16 41.11h crc=0x1aae69a4
+
+gfx = 0x000000 0x020000 byte64 09.4b crc=0xc3e83c69
+gfx = 0x000001 0x020000 byte64 01.4a crc=0x187b2886
+gfx = 0x000002 0x020000 byte64 13.9b crc=0x0273d87d
+gfx = 0x000003 0x020000 byte64 05.9a crc=0x339378b8
+gfx = 0x000004 0x020000 byte64 24.5e crc=0xc6909b6f
+gfx = 0x000005 0x020000 byte64 17.5c crc=0x2e2f8320
+gfx = 0x000006 0x020000 byte64 38.8h crc=0xcd7923ed
+gfx = 0x000007 0x020000 byte64 32.8f crc=0x21a0a453
+gfx = 0x100000 0x020000 byte64 10.5b crc=0xff28f8d0
+gfx = 0x100001 0x020000 byte64 02.5a crc=0xcc83c02f
+gfx = 0x100002 0x020000 byte64 14.10b crc=0x18fb232c
+gfx = 0x100003 0x020000 byte64 06.10a crc=0x6f9edd75
+gfx = 0x100004 0x020000 byte64 25.7e crc=0x152ea74a
+gfx = 0x100005 0x020000 byte64 18.7c crc=0x1833f932
+gfx = 0x100006 0x020000 byte64 39.9h crc=0xbc09b360
+gfx = 0x100007 0x020000 byte64 33.9f crc=0x89de1533
+gfx = 0x200000 0x020000 byte64 11.7b crc=0x29eaf490
+gfx = 0x200001 0x020000 byte64 03.7a crc=0x7bf51337
+gfx = 0x200002 0x020000 byte64 15.11b crc=0xd36cdb91
+gfx = 0x200003 0x020000 byte64 07.11a crc=0xe04af054
+gfx = 0x200004 0x020000 byte64 26.8e crc=0x07fc714b
+gfx = 0x200005 0x020000 byte64 19.8c crc=0x7114e5c6
+gfx = 0x200006 0x020000 byte64 28.10e crc=0xaf62bf07
+gfx = 0x200007 0x020000 byte64 21.10c crc=0x523f462a
+gfx = 0x300000 0x020000 byte64 12.8b crc=0x38652339
+gfx = 0x300001 0x020000 byte64 04.8a crc=0x4951bc0f
+gfx = 0x300002 0x020000 byte64 16.12b crc=0x381608ae
+gfx = 0x300003 0x020000 byte64 08.12a crc=0xb475d4e9
+gfx = 0x300004 0x020000 byte64 27.9e crc=0xa27e81fa
+gfx = 0x300005 0x020000 byte64 20.9c crc=0x002796dc
+gfx = 0x300006 0x020000 byte64 29.11e crc=0x6b41f82d
+gfx = 0x300007 0x020000 byte64 22.11c crc=0x52145369
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x2c
+priority        = 0x2a 0x28 0x26 0x24
+palette_control = 0x22
+layer_enable    = 0x02 0x04 0x08 0x00 0x00
+id              = 0x20 0x0002
+
+bank_sizes = 0x4000 0x4000 0x4000 0x4000
+gfx_bank = sprites 0x00000 0x03fff 0
+gfx_bank = sprites 0x04000 0x05fff 1
+gfx_bank = scroll1 0x06000 0x07fff 1
+gfx_bank = scroll3 0x00000 0x03fff 2
+gfx_bank = scroll2 0x04000 0x07fff 3

@@ -1,0 +1,36 @@
+# Board file for MAME's `strideruc`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   34.8f crc=0xe0fb5657
+program = 0x080000 0x080000 word   33.6f crc=0x9b3cfc08
+
+gfx = 0x000000 0x080000 word64 6.8a crc=0x4eee9aea
+gfx = 0x000002 0x080000 word64 8.10a crc=0x2d7f21e4
+gfx = 0x000004 0x080000 word64 5.7a crc=0x7705aa46
+gfx = 0x000006 0x080000 word64 7.9a crc=0x5b18b722
+gfx = 0x200000 0x080000 word64 15.8c crc=0x005f000b
+gfx = 0x200002 0x080000 word64 17.10c crc=0xb9441519
+gfx = 0x200004 0x080000 word64 14.7c crc=0xb7d04e8b
+gfx = 0x200006 0x080000 word64 16.9c crc=0x6b4713b4
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x14
+priority        = 0x12 0x10 0x0e 0x0c
+palette_control = 0x0a
+layer_enable    = 0x08 0x14 0x02 0x00 0x00
+id              = 0x08 0x0407
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = stars 0x00000 0x003ff 0
+gfx_bank = sprites 0x00000 0x04fff 0
+gfx_bank = scroll2 0x04000 0x07fff 0
+gfx_bank = scroll3 0x00000 0x07fff 1
+gfx_bank = scroll1 0x07000 0x07fff 1

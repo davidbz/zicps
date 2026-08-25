@@ -1,0 +1,69 @@
+# Board file for MAME's `kodja`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 kdj_36a.12f crc=0xebc788ad
+program = 0x000001 0x020000 byte16 kdj_42a.12h crc=0xe55c3529
+program = 0x040000 0x020000 byte16 kdj_37a.13f crc=0xc710d722
+program = 0x040001 0x020000 byte16 kdj_43a.13h crc=0x57d6ed3a
+program = 0x080000 0x020000 byte16 kd_34.10f crc=0x9367bcd9
+program = 0x080001 0x020000 byte16 kd_40.10h crc=0x4ca6a48a
+program = 0x0c0000 0x020000 byte16 kd_35.11f crc=0x0360fa72
+program = 0x0c0001 0x020000 byte16 kd_41a.11h crc=0x95a3cef8
+
+gfx = 0x000000 0x020000 byte64 kd_9.4b crc=0x401a98e3
+gfx = 0x000001 0x020000 byte64 kd_1.4a crc=0x5894399a
+gfx = 0x000002 0x020000 byte64 kd_13.9b crc=0xb6685131
+gfx = 0x000003 0x020000 byte64 kd_5.9a crc=0xc29b9ab3
+gfx = 0x000004 0x020000 byte64 kd_24.5e crc=0x97008fdb
+gfx = 0x000005 0x020000 byte64 kd_17.5c crc=0xdc9a83d3
+gfx = 0x000006 0x020000 byte64 kd_38.8h crc=0x9c3dd2d1
+gfx = 0x000007 0x020000 byte64 kd_32.8f crc=0x1b2a802a
+gfx = 0x100000 0x020000 byte64 kd_10.5b crc=0xe788ae96
+gfx = 0x100001 0x020000 byte64 kd_2.5a crc=0xb022e3e3
+gfx = 0x100002 0x020000 byte64 kd_14.10b crc=0x4840c5ef
+gfx = 0x100003 0x020000 byte64 kd_6.10a crc=0x519faee4
+gfx = 0x100004 0x020000 byte64 kd_25.7e crc=0x5d0fa853
+gfx = 0x100005 0x020000 byte64 kd_18.7c crc=0x6ad3b2bb
+gfx = 0x100006 0x020000 byte64 kd_39.9h crc=0xd7920213
+gfx = 0x100007 0x020000 byte64 kd_33.9f crc=0x65c2bed6
+gfx = 0x200000 0x020000 byte64 kd_11.7b crc=0x147e3310
+gfx = 0x200001 0x020000 byte64 kd_3.7a crc=0x5d18bc83
+gfx = 0x200002 0x020000 byte64 kd_15.11b crc=0x57359746
+gfx = 0x200003 0x020000 byte64 kd_7.11a crc=0x7fe03079
+gfx = 0x200004 0x020000 byte64 kd_26.8e crc=0x57e5fab5
+gfx = 0x200005 0x020000 byte64 kd_19.8c crc=0xb1f30f7c
+gfx = 0x200006 0x020000 byte64 kd_28.10e crc=0x3a424135
+gfx = 0x200007 0x020000 byte64 kd_21.10c crc=0xce10d2c3
+gfx = 0x300000 0x020000 byte64 kd_12.8b crc=0xa6042aa2
+gfx = 0x300001 0x020000 byte64 kd_4.8a crc=0x0ce0ba30
+gfx = 0x300002 0x020000 byte64 kd_16.12b crc=0x63dcb7e0
+gfx = 0x300003 0x020000 byte64 kd_8.12a crc=0xc69b77ae
+gfx = 0x300004 0x020000 byte64 kd_27.9e crc=0x40d7bfed
+gfx = 0x300005 0x020000 byte64 kd_20.9c crc=0x01c1f399
+gfx = 0x300006 0x020000 byte64 kd_29.11e crc=0xa1eeac03
+gfx = 0x300007 0x020000 byte64 kd_22.11c crc=0x5ade98eb
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x20
+priority        = 0x2e 0x2c 0x2a 0x28
+palette_control = 0x30
+layer_enable    = 0x30 0x08 0x30 0x00 0x00
+multiply        = 0x1e 0x1c 0x1a 0x18
+in2             = 0x36
+out2            = 0x34
+
+bank_sizes = 0x4000 0x4000 0x4000 0x4000
+gfx_bank = sprites 0x00000 0x03fff 0
+gfx_bank = sprites 0x04000 0x07fff 1
+gfx_bank = sprites 0x08000 0x08fff 2
+gfx_bank = scroll2 0x09000 0x0bfff 2
+gfx_bank = scroll1 0x0c000 0x0d7ff 3
+gfx_bank = scroll3 0x0d800 0x0ffff 3

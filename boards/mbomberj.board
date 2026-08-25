@@ -1,0 +1,54 @@
+# Board file for MAME's `mbomberj`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   mbj_23e.8f crc=0x0d06036a
+program = 0x080000 0x080000 word   mbj_22b.7f crc=0xacd38478
+program = 0x100000 0x080000 word   mbj_21a.6f crc=0xd5007b05
+program = 0x180000 0x080000 word   mbj_20a.5f crc=0xaeb557b0
+
+gfx = 0x000000 0x080000 word64 mb_01.3a crc=0xa53b1c81
+gfx = 0x000002 0x080000 word64 mb_02.4a crc=0x23fe10f6
+gfx = 0x000004 0x080000 word64 mb_03.5a crc=0xcb866c2f
+gfx = 0x000006 0x080000 word64 mb_04.6a crc=0xc9143e75
+gfx = 0x200000 0x080000 word64 mb_05.7a crc=0x506b9dc9
+gfx = 0x200002 0x080000 word64 mb_06.8a crc=0xaff8c2fb
+gfx = 0x200004 0x080000 word64 mb_07.9a crc=0xb76c70e9
+gfx = 0x200006 0x080000 word64 mb_08.10a crc=0xe60c9556
+gfx = 0x400000 0x080000 word64 mb_10.3c crc=0x97976ff5
+gfx = 0x400002 0x080000 word64 mb_11.4c crc=0xb350a840
+gfx = 0x400004 0x080000 word64 mb_12.5c crc=0x8fb94743
+gfx = 0x400006 0x080000 word64 mb_13.6c crc=0xda810d5f
+
+audio = 0x000000 0x008000 byte   mb_qa.5k crc=0xe21a03c4
+audio = 0x010000 0x018000 byte   mb_qa.5k 0x8000 crc=0xe21a03c4
+
+qsound = 0x000000 0x080000 byte   mb-q1.1k crc=0x0630c3ce
+qsound = 0x080000 0x080000 byte   mb-q2.2k crc=0x354f9c21
+qsound = 0x100000 0x080000 byte   mb-q3.3k crc=0x7838487c
+qsound = 0x180000 0x080000 byte   mb-q4.4k crc=0xab66e087
+qsound = 0x200000 0x080000 byte   mb-q5.1m crc=0xc789fef2
+qsound = 0x280000 0x080000 byte   mb-q6.2m crc=0xecb81b61
+qsound = 0x300000 0x080000 byte   mb-q7.3m crc=0x041e49ba
+qsound = 0x380000 0x080000 byte   mb-q8.4m crc=0x59fe702a
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x16
+priority        = 0x00 0x02 0x28 0x2a
+palette_control = 0x2c
+layer_enable    = 0x04 0x08 0x10 0x00 0x00
+id              = 0x2e 0x0c01
+
+bank_sizes = 0x8000 0x8000 0x8000 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x08000 0x0ffff 1
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x10000 0x17fff 2
+
+kabuki = 0x54321076 0x65432107 0x3131 0x19

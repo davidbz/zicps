@@ -1,0 +1,47 @@
+# Board file for MAME's `mercsur1`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 so2_30.11f crc=0xe17f9bf7
+program = 0x000001 0x020000 byte16 so2_35.11h crc=0x4477df61
+program = 0x040000 0x020000 byte16 so2_31.12f crc=0x51204d36
+program = 0x040001 0x020000 byte16 so2_36.12h crc=0x9cfba8b4
+program = 0x080000 0x080000 word   so2-32m.8h crc=0x2eb5cf0c
+
+gfx = 0x000000 0x080000 word64 so2-6m.8a crc=0xaa6102af
+gfx = 0x000002 0x080000 word64 so2-8m.10a crc=0x839e6869
+gfx = 0x000004 0x080000 word64 so2-2m.4a crc=0x597c2875
+gfx = 0x000006 0x080000 word64 so2-4m.6a crc=0x912a9ca0
+gfx = 0x200000 0x020000 byte64 so2_24.7d crc=0x3f254efe
+gfx = 0x200001 0x020000 byte64 so2_14.7c crc=0xf5a8905e
+gfx = 0x200002 0x020000 byte64 so2_26.9d crc=0xf3aa5a4a
+gfx = 0x200003 0x020000 byte64 so2_16.9c crc=0xb43cd1a8
+gfx = 0x200004 0x020000 byte64 so2_20.3d crc=0x8ca751a3
+gfx = 0x200005 0x020000 byte64 so2_10.3c crc=0xe9f569fd
+gfx = 0x200006 0x020000 byte64 so2_22.5d crc=0xfce9a377
+gfx = 0x200007 0x020000 byte64 so2_12.5c crc=0xb7df8a06
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x2c
+priority        = 0x2a 0x28 0x26 0x24
+palette_control = 0x22
+layer_enable    = 0x02 0x04 0x08 0x00 0x00
+id              = 0x20 0x0402
+in2             = 0x36
+out2            = 0x34
+
+bank_sizes = 0x8000 0x4000 0x0 0x0
+gfx_bank = scroll1 0x00000 0x00bff 0
+gfx_bank = scroll2 0x00c00 0x03bff 0
+gfx_bank = scroll3 0x03c00 0x04bff 0
+gfx_bank = sprites 0x04c00 0x07fff 0
+gfx_bank = sprites 0x08000 0x0a7ff 1
+gfx_bank = scroll2 0x0a800 0x0b7ff 1
+gfx_bank = scroll3 0x0b800 0x0bfff 1

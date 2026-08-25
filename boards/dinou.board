@@ -1,0 +1,43 @@
+# Board file for MAME's `dinou`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   cdu_23a.8f crc=0x7c2543cd
+program = 0x080000 0x080000 word   cdu_22a.7f crc=0xd19f981e
+program = 0x100000 0x080000 word   cdu_21a.6f crc=0x66d23de2
+
+gfx = 0x000000 0x080000 word64 cd-1m.3a crc=0x8da4f917
+gfx = 0x000002 0x080000 word64 cd-3m.5a crc=0x6c40f603
+gfx = 0x000004 0x080000 word64 cd-2m.4a crc=0x09c8fc2d
+gfx = 0x000006 0x080000 word64 cd-4m.6a crc=0x637ff38f
+gfx = 0x200000 0x080000 word64 cd-5m.7a crc=0x470befee
+gfx = 0x200002 0x080000 word64 cd-7m.9a crc=0x22bfb7a3
+gfx = 0x200004 0x080000 word64 cd-6m.8a crc=0xe7599ac4
+gfx = 0x200006 0x080000 word64 cd-8m.10a crc=0x211b4b15
+
+audio = 0x000000 0x008000 byte   cd_q.5k crc=0x605fdb0b
+audio = 0x010000 0x018000 byte   cd_q.5k 0x8000 crc=0x605fdb0b
+
+qsound = 0x000000 0x080000 byte   cd-q1.1k crc=0x60927775
+qsound = 0x080000 0x080000 byte   cd-q2.2k crc=0x770f4c47
+qsound = 0x100000 0x080000 byte   cd-q3.3k crc=0x2f273ffc
+qsound = 0x180000 0x080000 byte   cd-q4.4k crc=0x2c67821d
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x0a
+priority        = 0x0c 0x0e 0x00 0x02
+palette_control = 0x04
+layer_enable    = 0x16 0x16 0x16 0x00 0x00
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x08000 0x0ffff 1
+
+kabuki = 0x76543210 0x24601357 0x4343 0x43

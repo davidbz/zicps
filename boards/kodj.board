@@ -1,0 +1,41 @@
+# Board file for MAME's `kodj`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 kdj_30a.11e crc=0xebc788ad
+program = 0x000001 0x020000 byte16 kdj_37a.11f crc=0xe55c3529
+program = 0x040000 0x020000 byte16 kdj_31a.12e crc=0xc710d722
+program = 0x040001 0x020000 byte16 kdj_38a.12f crc=0x57d6ed3a
+program = 0x080000 0x080000 word   kd_33.6f crc=0x9bd7ad4b
+
+gfx = 0x000000 0x080000 word64 kd_06.8a crc=0xe45b8701
+gfx = 0x000002 0x080000 word64 kd_08.10a crc=0xa7750322
+gfx = 0x000004 0x080000 word64 kd_05.7a crc=0x5f74bf78
+gfx = 0x000006 0x080000 word64 kd_07.9a crc=0x5e5303bf
+gfx = 0x200000 0x080000 word64 kd_15.8c crc=0x113358f3
+gfx = 0x200002 0x080000 word64 kd_17.10c crc=0x38853c44
+gfx = 0x200004 0x080000 word64 kd_14.7c crc=0x9ef36604
+gfx = 0x200006 0x080000 word64 kd_16.9c crc=0x402b9b4f
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x20
+priority        = 0x2e 0x2c 0x2a 0x28
+palette_control = 0x30
+layer_enable    = 0x30 0x08 0x30 0x00 0x00
+multiply        = 0x1e 0x1c 0x1a 0x18
+in2             = 0x36
+out2            = 0x34
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites 0x00000 0x07fff 0
+gfx_bank = sprites 0x08000 0x08fff 1
+gfx_bank = scroll2 0x09000 0x0bfff 1
+gfx_bank = scroll1 0x0c000 0x0d7ff 1
+gfx_bank = scroll3 0x0d800 0x0ffff 1

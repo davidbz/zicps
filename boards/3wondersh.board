@@ -1,0 +1,51 @@
+# Board file for MAME's `3wondersh`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 22.bin crc=0xe6071884
+program = 0x000001 0x020000 byte16 26.bin crc=0xa28447b7
+program = 0x040000 0x020000 byte16 23.bin crc=0xfd3d6509
+program = 0x040001 0x020000 byte16 27.bin crc=0x999cba3d
+program = 0x080000 0x020000 byte16 rt_28a.9f crc=0x054137c8
+program = 0x080001 0x020000 byte16 rt_33a.9h crc=0x7264cb1b
+program = 0x0c0000 0x020000 byte16 rte_29a.10f crc=0xcddaa919
+program = 0x0c0001 0x020000 byte16 rte_34a.10h crc=0xed52e7e5
+
+gfx = 0x000000 0x040000 byte64 16.bin crc=0xc997bca2
+gfx = 0x000001 0x040000 byte64 6.bin crc=0x3eea321a
+gfx = 0x000002 0x040000 byte64 18.bin crc=0x98acdfd4
+gfx = 0x000003 0x040000 byte64 8.bin crc=0xdc9ca6f9
+gfx = 0x000004 0x040000 byte64 12.bin crc=0x0d8a6007
+gfx = 0x000005 0x040000 byte64 2.bin crc=0xd75563b9
+gfx = 0x000006 0x040000 byte64 14.bin crc=0x84369a28
+gfx = 0x000007 0x040000 byte64 4.bin crc=0xd4831578
+gfx = 0x200000 0x040000 byte64 17.bin crc=0x040edff5
+gfx = 0x200001 0x040000 byte64 7.bin crc=0xc7c0468c
+gfx = 0x200002 0x040000 byte64 19.bin crc=0x9fef114f
+gfx = 0x200003 0x040000 byte64 9.bin crc=0x48cbfba5
+gfx = 0x200004 0x040000 byte64 13.bin crc=0x8fc3d7d1
+gfx = 0x200005 0x040000 byte64 3.bin crc=0xc65e9a86
+gfx = 0x200006 0x040000 byte64 15.bin crc=0xf239341a
+gfx = 0x200007 0x040000 byte64 5.bin crc=0x947ac944
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x28
+priority        = 0x26 0x24 0x22 0x20
+palette_control = 0x22
+layer_enable    = 0x20 0x04 0x08 0x12 0x12
+multiply        = 0x0e 0x0c 0x0a 0x08
+
+bank_sizes = 0x8000 0x8000 0x0 0x0
+gfx_bank = sprites 0x00000 0x053ff 0
+gfx_bank = scroll1 0x05400 0x06fff 0
+gfx_bank = scroll3 0x07000 0x07fff 0
+gfx_bank = scroll3 0x00000 0x03fff 1
+gfx_bank = scroll2 0x02800 0x07fff 1
+gfx_bank = sprites 0x05400 0x07fff 1

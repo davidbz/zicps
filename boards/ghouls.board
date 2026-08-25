@@ -1,0 +1,48 @@
+# Board file for MAME's `ghouls`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 dme_29.10h crc=0x166a58a2
+program = 0x000001 0x020000 byte16 dme_30.10j crc=0x7ac8407a
+program = 0x040000 0x020000 byte16 dme_27.9h crc=0xf734b2be
+program = 0x040001 0x020000 byte16 dme_28.9j crc=0x03d3e714
+program = 0x080000 0x080000 byte   dm-17.7j crc=0x3ea1b0f2
+
+gfx = 0x000000 0x080000 word64 dm-05.3a crc=0x0ba9c0b0
+gfx = 0x000002 0x080000 word64 dm-07.3f crc=0x5d760ab9
+gfx = 0x000004 0x080000 word64 dm-06.3c crc=0x4ba90b59
+gfx = 0x000006 0x080000 word64 dm-08.3g crc=0x4bdee9de
+gfx = 0x200000 0x010000 byte64 09.4a crc=0xae24bb19
+gfx = 0x200001 0x010000 byte64 18.7a crc=0xd34e271a
+gfx = 0x200002 0x010000 byte64 13.4e crc=0x3f70dd37
+gfx = 0x200003 0x010000 byte64 22.7e crc=0x7e69e2e6
+gfx = 0x200004 0x010000 byte64 11.4c crc=0x37c9b6c6
+gfx = 0x200005 0x010000 byte64 20.7c crc=0x2f1345b4
+gfx = 0x200006 0x010000 byte64 15.4g crc=0x3c2a212a
+gfx = 0x200007 0x010000 byte64 24.7g crc=0x889aac05
+gfx = 0x280000 0x010000 byte64 10.4b crc=0xbcc0f28c
+gfx = 0x280001 0x010000 byte64 19.7b crc=0x2a40166a
+gfx = 0x280002 0x010000 byte64 14.4f crc=0x20f85c03
+gfx = 0x280003 0x010000 byte64 23.7f crc=0x8426144b
+gfx = 0x280004 0x010000 byte64 12.4d crc=0xda088d61
+gfx = 0x280005 0x010000 byte64 21.7d crc=0x17e11df0
+gfx = 0x280006 0x010000 byte64 16.4h crc=0xf187ba1c
+gfx = 0x280007 0x010000 byte64 25.7h crc=0x29f79c78
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+
+bank_sizes = 0x8000 0x2000 0x2000 0x0
+gfx_bank = scroll3 0x08000 0x0bfff 1
+gfx_bank = sprites 0x02000 0x03fff 2
+gfx_bank = sprites|scroll1|scroll2|scroll3|stars 0x00000 0x1ffff 0

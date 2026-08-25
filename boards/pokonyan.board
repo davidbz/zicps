@@ -1,0 +1,47 @@
+# Board file for MAME's `pokonyan`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 xmqq-12f.bin crc=0x196297bf
+program = 0x000001 0x020000 byte16 xmqq-12h.bin crc=0x2d7ee2e9
+program = 0x040000 0x020000 byte16 xmqq-13f.bin crc=0x8f6abf26
+program = 0x040001 0x020000 byte16 xmqq-13h.bin crc=0x3fefe432
+
+gfx = 0x000000 0x020000 byte64 xmqq-4b.bin crc=0x933ab76d
+gfx = 0x000001 0x020000 byte64 xmqq-4a.bin crc=0xb098e7a9
+gfx = 0x000002 0x020000 byte64 xmqq-9b.bin crc=0xb66d62d4
+gfx = 0x000003 0x020000 byte64 xmqq-9a.bin crc=0x9c23e40b
+gfx = 0x000004 0x020000 byte64 xmqq-5e.bin crc=0x63d06d6f
+gfx = 0x000005 0x020000 byte64 xmqq-5c.bin crc=0xe2169bb5
+gfx = 0x000006 0x020000 byte64 xmqq-8h.bin crc=0x113121f5
+gfx = 0x000007 0x020000 byte64 xmqq-8f.bin crc=0xbeb00e07
+gfx = 0x100000 0x020000 byte64 xmqq-5b.bin crc=0x05354905
+gfx = 0x100001 0x020000 byte64 xmqq-5a.bin crc=0xbd40215e
+gfx = 0x100002 0x020000 byte64 xmqq-10b.bin crc=0x9fa773ef
+gfx = 0x100003 0x020000 byte64 xmqq-10a.bin crc=0x638d4bc7
+gfx = 0x100004 0x020000 byte64 xmqq-7e.bin crc=0x72c45858
+gfx = 0x100005 0x020000 byte64 xmqq-7c.bin crc=0xd91cda18
+gfx = 0x100006 0x020000 byte64 xmqq-9h.bin crc=0x3cd8594b
+gfx = 0x100007 0x020000 byte64 xmqq-9f.bin crc=0x1ec10bed
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+in2             = 0x36
+
+bank_sizes = 0x8000 0x8000 0x8000 0x0
+gfx_bank = sprites 0x00000 0x02fff 0
+gfx_bank = scroll1 0x07000 0x07fff 0
+gfx_bank = scroll3 0x03000 0x03fff 0
+gfx_bank = scroll2 0x04000 0x06fff 0

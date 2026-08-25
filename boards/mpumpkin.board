@@ -1,0 +1,39 @@
+# Board file for MAME's `mpumpkin`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   mpa_23.8f crc=0x38b9883a
+
+gfx = 0x000000 0x080000 word64 mpa_01.3a crc=0x7c8c0c22
+gfx = 0x000002 0x080000 word64 mpa_02.4a crc=0x23f95339
+gfx = 0x000004 0x080000 word64 mpa_03.5a crc=0x107842a6
+gfx = 0x000006 0x080000 word64 mpa_04.6a crc=0xfce457ae
+gfx = 0x200000 0x080000 word64 mpa_05.7a crc=0xba8f3585
+gfx = 0x200002 0x080000 word64 mpa_06.8a crc=0x037f20cc
+gfx = 0x200004 0x080000 word64 mpa_07.9a crc=0xba8f3585
+gfx = 0x200006 0x080000 word64 mpa_08.10a crc=0x037f20cc
+gfx = 0x400000 0x080000 word64 mpa_10.3c crc=0x870f3a2a
+gfx = 0x400002 0x080000 word64 mpa_11.4c crc=0x8923fc3a
+gfx = 0x400004 0x080000 word64 mpa_12.5c crc=0x87b88629
+gfx = 0x400006 0x080000 word64 mpa_13.6c crc=0xa09a6acf
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x8000 0x8000 0x8000 0x8000
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x08000 0x0ffff 1
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x10000 0x17fff 2
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x18000 0x1ffff 3

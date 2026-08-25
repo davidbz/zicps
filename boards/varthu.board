@@ -1,0 +1,28 @@
+# Board file for MAME's `varthu`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   vau_23a.8f crc=0xfbe68726
+program = 0x080000 0x080000 word   vau_22a.7f crc=0x0ed71bbd
+
+gfx = 0x000000 0x080000 word64 va-5m.3a crc=0xb1fb726e
+gfx = 0x000002 0x080000 word64 va-7m.5a crc=0x4c6588cd
+gfx = 0x000004 0x080000 word64 va-1m.4a crc=0x0b1ace37
+gfx = 0x000006 0x080000 word64 va-3m.6a crc=0x44dfe706
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x2e
+priority        = 0x26 0x30 0x28 0x32
+palette_control = 0x2a
+layer_enable    = 0x02 0x04 0x08 0x00 0x00
+id              = 0x20 0x0004
+
+bank_sizes = 0x8000 0x0 0x0 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x07fff 0

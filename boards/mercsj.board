@@ -1,0 +1,62 @@
+# Board file for MAME's `mercsj`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 so2_36.12f crc=0xe17f9bf7
+program = 0x000001 0x020000 byte16 so2_42.12h crc=0x2c3884c6
+program = 0x040000 0x020000 byte16 so2_37.13f crc=0x51204d36
+program = 0x040001 0x020000 byte16 so2_43.13h crc=0x9cfba8b4
+program = 0x080000 0x020000 byte16 so2_34.10f crc=0xb8dae95f
+program = 0x080001 0x020000 byte16 so2_40.10h crc=0xde37771c
+program = 0x0c0000 0x020000 byte16 so2_35.11f crc=0x7d24394d
+program = 0x0c0001 0x020000 byte16 so2_41.11h crc=0x914f85e0
+
+gfx = 0x000000 0x020000 byte64 so2_09.4b crc=0x690c261d
+gfx = 0x000001 0x020000 byte64 so2_01.4a crc=0x31fd2715
+gfx = 0x000002 0x020000 byte64 so2_13.9b crc=0xb5e48282
+gfx = 0x000003 0x020000 byte64 so2_05.9a crc=0x54bed82c
+gfx = 0x000004 0x020000 byte64 so2_24.5e crc=0x78b6f0cb
+gfx = 0x000005 0x020000 byte64 so2_17.5c crc=0xe78bb308
+gfx = 0x000006 0x020000 byte64 so2_38.8h crc=0x0010a9a2
+gfx = 0x000007 0x020000 byte64 so2_32.8f crc=0x75dffc9a
+gfx = 0x100000 0x020000 byte64 so2_10.5b crc=0x2f871714
+gfx = 0x100001 0x020000 byte64 so2_02.5a crc=0xb4b2a0b7
+gfx = 0x100002 0x020000 byte64 so2_14.10b crc=0x737a744b
+gfx = 0x100003 0x020000 byte64 so2_06.10a crc=0x9d756f51
+gfx = 0x100004 0x020000 byte64 so2_25.7e crc=0x6d0e05d6
+gfx = 0x100005 0x020000 byte64 so2_18.7c crc=0x96f61f4e
+gfx = 0x100006 0x020000 byte64 so2_39.9h crc=0xd52ba336
+gfx = 0x100007 0x020000 byte64 so2_33.9f crc=0x39b90d25
+gfx = 0x200000 0x020000 byte64 so2_11.7b crc=0x3f254efe
+gfx = 0x200001 0x020000 byte64 so2_03.7a crc=0xf5a8905e
+gfx = 0x200002 0x020000 byte64 so2_15.11b crc=0xf3aa5a4a
+gfx = 0x200003 0x020000 byte64 so2_07.11a crc=0xb43cd1a8
+gfx = 0x200004 0x020000 byte64 so2_26.8e crc=0x8ca751a3
+gfx = 0x200005 0x020000 byte64 so2_19.8c crc=0xe9f569fd
+gfx = 0x200006 0x020000 byte64 so2_28.10e crc=0xfce9a377
+gfx = 0x200007 0x020000 byte64 so2_21.10c crc=0xb7df8a06
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x2c
+priority        = 0x2a 0x28 0x26 0x24
+palette_control = 0x22
+layer_enable    = 0x02 0x04 0x08 0x00 0x00
+id              = 0x20 0x0402
+in2             = 0x36
+out2            = 0x34
+
+bank_sizes = 0x8000 0x4000 0x0 0x0
+gfx_bank = scroll1 0x00000 0x00bff 0
+gfx_bank = scroll2 0x00c00 0x03bff 0
+gfx_bank = scroll3 0x03c00 0x04bff 0
+gfx_bank = sprites 0x04c00 0x07fff 0
+gfx_bank = sprites 0x08000 0x0a7ff 1
+gfx_bank = scroll2 0x0a800 0x0b7ff 1
+gfx_bank = scroll3 0x0b800 0x0bfff 1

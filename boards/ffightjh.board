@@ -1,0 +1,30 @@
+# Board file for MAME's `ffightjh`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x080000 word   ff_23.8f crc=0xae3dda7f
+program = 0x080000 0x080000 word   ff_22.7f crc=0xb2d5a3aa
+
+gfx = 0x000000 0x080000 word64 ff_1.3a crc=0x969d18e2
+gfx = 0x000002 0x080000 word64 ff_2.4a crc=0x02b59f99
+gfx = 0x000004 0x080000 word64 ff_3.5a crc=0x01d507ae
+gfx = 0x000006 0x080000 word64 ff_4.6a crc=0xf7c4ceb0
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+
+bank_sizes = 0x8000 0x0 0x0 0x0
+gfx_bank = sprites 0x00000 0x043ff 0
+gfx_bank = scroll1 0x04400 0x04bff 0
+gfx_bank = scroll3 0x04c00 0x05fff 0
+gfx_bank = scroll2 0x06000 0x07fff 0

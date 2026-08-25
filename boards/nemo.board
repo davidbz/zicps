@@ -1,0 +1,36 @@
+# Board file for MAME's `nemo`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x020000 byte16 nme_30a.11f crc=0xd2c03e56
+program = 0x000001 0x020000 byte16 nme_35a.11h crc=0x5fd31661
+program = 0x040000 0x020000 byte16 nme_31a.12f crc=0xb2bd4f6f
+program = 0x040001 0x020000 byte16 nme_36a.12h crc=0xee9450e3
+program = 0x080000 0x080000 word   nm-32m.8h crc=0xd6d1add3
+
+gfx = 0x000000 0x080000 word64 nm-5m.7a crc=0x487b8747
+gfx = 0x000002 0x080000 word64 nm-7m.9a crc=0x203dc8c6
+gfx = 0x000004 0x080000 word64 nm-1m.3a crc=0x9e878024
+gfx = 0x000006 0x080000 word64 nm-3m.5a crc=0xbb01e6b6
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x02
+priority        = 0x04 0x06 0x08 0x0a
+palette_control = 0x0c
+layer_enable    = 0x04 0x02 0x20 0x00 0x00
+id              = 0x0e 0x0405
+
+bank_sizes = 0x8000 0x0 0x0 0x0
+gfx_bank = sprites 0x00000 0x03fff 0
+gfx_bank = scroll2 0x00000 0x03fff 0
+gfx_bank = scroll1 0x04000 0x047ff 0
+gfx_bank = sprites 0x04800 0x067ff 0
+gfx_bank = scroll2 0x04800 0x067ff 0
+gfx_bank = scroll3 0x06800 0x07fff 0

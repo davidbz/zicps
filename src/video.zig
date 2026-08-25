@@ -167,6 +167,12 @@ pub fn readB(v: *const Video, b: *const board.Board, offset: u8) u16 {
     if (offset >= board.cps_b_bytes) return open_bus;
     if (same(b.id_offset, offset)) return b.id_value;
 
+    // The extra controls a C-board maps into this window on a three- or
+    // four-player cabinet. Nothing here is wired to a panel, and an input
+    // nobody is pressing reads high — which the last value written to the
+    // register is not, and a game polling player three would believe it.
+    if (same(b.in2_offset, offset) or same(b.in3_offset, offset)) return open_bus;
+
     const product = multiply(v, b);
     if (same(b.mult_result_lo, offset)) return @truncate(product);
     if (same(b.mult_result_hi, offset)) return @truncate(product >> 16);
@@ -729,6 +735,14 @@ test "the CPS-B file answers the two reads a game checks before it boots" {
     writeB(&v, &b, 0x02, 0x5678, 0xffff);
     try testing.expectEqual(@as(u16, 0x0060), readB(&v, &b, 0x04));
     try testing.expectEqual(@as(u16, 0x0626), readB(&v, &b, 0x06));
+
+    // A four-player board's extra inputs are not registers either, and read
+    // as a panel with nobody at it.
+    b.in2_offset = 0x36;
+    b.in3_offset = 0x38;
+    writeB(&v, &b, 0x36, 0x0000, 0xffff);
+    try testing.expectEqual(@as(u16, open_bus), readB(&v, &b, 0x36));
+    try testing.expectEqual(@as(u16, open_bus), readB(&v, &b, 0x38));
 
     // A board with no multiplier keeps those offsets as plain registers.
     b.mult_factor1 = null;

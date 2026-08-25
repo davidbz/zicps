@@ -1,0 +1,35 @@
+# Board file for MAME's `pang3b2`, written by tools/mame_to_board.zig.
+#
+# The register mapping, the bank table and the Kabuki key are what a
+# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
+# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+
+program = 0x000000 0x040000 byte16 16.u70 crc=0x8d3fd82c
+program = 0x000001 0x040000 byte16 14.u72 crc=0x654904c8
+program = 0x080000 0x040000 byte16 15.u71 crc=0x42774e37
+program = 0x080001 0x040000 byte16 13.u73 crc=0x531ea745
+
+gfx = 0x000000 0x080000 byte64 4.u68 crc=0x45fc0a81
+gfx = 0x000001 0x080000 byte64 2.u66 crc=0x27668828
+gfx = 0x000002 0x080000 byte64 10.u69 crc=0xe051b2e9
+gfx = 0x000003 0x080000 byte64 8.u63 crc=0x4a68b194
+gfx = 0x000004 0x080000 byte64 3.u67 crc=0x91c8d782
+gfx = 0x000005 0x080000 byte64 1.u65 crc=0xfe32af5d
+gfx = 0x000006 0x080000 byte64 9.u62 crc=0xf0bba5c7
+gfx = 0x000007 0x080000 byte64 7.u64 crc=0xc60c5e75
+
+# --- what the battery held -----------------------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x10000 0x0 0x0 0x0
+gfx_bank = sprites|scroll1|scroll2|scroll3 0x00000 0x0ffff 0
