@@ -217,7 +217,7 @@ pub fn build(b: *std.Build) void {
     }
 
     const modules = [_]*std.Build.Module{
-        board, romset, video,  cps,        scheduler, input, config,
+        board, romset, video,  cps,        scheduler, input,  config,
         audio, kabuki, qsound, soundboard, snow,      boards, system_tests,
     };
     for (modules) |module| {
