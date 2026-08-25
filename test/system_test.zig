@@ -725,23 +725,24 @@ test "the test ROM draws its three tilemaps" {
 /// The scoreboard fails on a move in either direction — a layer that stopped
 /// drawing and a layer that started covering the others are the same bug.
 ///
-/// The hashes moved at M3 and the scores did not, which is the whole story of
-/// that milestone from the picture's side: `scheduler.hash` took the sound
-/// board in, and nothing draws differently for it.
+/// The hashes moved at M3 and again at M4, and the scores did not, which is
+/// the whole story of those milestones from the picture's side: `scheduler.hash`
+/// took the sound board in and then the chip's own state, and nothing draws
+/// differently for it.
 const Pin = struct {
     scores: [video.palette_pages]u32,
     hash: u64,
 };
 
 const pinned = [page_count]Pin{
-    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0xae890c22ef81e4e1 },
-    .{ .scores = .{ 1680, 783, 1984, 6358, 0, 0 }, .hash = 0x0791feb5e34e0fb3 },
-    .{ .scores = .{ 1616, 783, 2048, 6358, 0, 0 }, .hash = 0xc442d177de5cf455 },
-    .{ .scores = .{ 1680, 783, 0, 8217, 0, 0 }, .hash = 0xd65981cb0f5cb0d5 },
-    .{ .scores = .{ 0, 783, 1488, 8176, 0, 0 }, .hash = 0xd28df4bad525dd8d },
-    .{ .scores = .{ 0, 0, 0, 0, 168, 168 }, .hash = 0x0decf3c1532baa9a },
-    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0xb16e2a702f6438e3 },
-    .{ .scores = .{ 0, 783, 2208, 6042, 0, 0 }, .hash = 0x36e165c3a9294177 },
+    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0x9e28759153905dbd },
+    .{ .scores = .{ 1680, 783, 1984, 6358, 0, 0 }, .hash = 0xc5ae261ee2b7e88c },
+    .{ .scores = .{ 1616, 783, 2048, 6358, 0, 0 }, .hash = 0xc09d9b2d2bb304ec },
+    .{ .scores = .{ 1680, 783, 0, 8217, 0, 0 }, .hash = 0xf2b9608215a5a48e },
+    .{ .scores = .{ 0, 783, 1488, 8176, 0, 0 }, .hash = 0x82427d2f1a063344 },
+    .{ .scores = .{ 0, 0, 0, 0, 168, 168 }, .hash = 0x737f11cff9cd1186 },
+    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0x99190364dab6c27b },
+    .{ .scores = .{ 0, 783, 2208, 6042, 0, 0 }, .hash = 0xb3acf606c85211df },
 };
 
 test "scoreboard: every page of the test ROM draws what it drew" {
@@ -840,9 +841,27 @@ const z80_command = 0xc000;
 const qs_bank = 0x00;
 const qs_start = 0x01;
 const qs_pitch = 0x02;
+const qs_loop = 0x04;
+const qs_end = 0x05;
 const qs_volume = 0x06;
+const qs_pan = 0x80;
 const qs_bank_value = 0x8000;
 const qs_volume_value = 0x1000;
+const qs_end_value = 0x4000;
+const qs_loop_value = 0x4000;
+const qs_pan_value = 0x0120;
+
+/// One register write, the long way round: both data bytes and then the
+/// register number that commits them.
+///
+///     ld a,hi / ld (0xd000),a / ld a,lo / ld (0xd001),a / ld a,reg / ld (0xd002),a
+fn setReg(comptime reg: u8, comptime value: u16) [15]u8 {
+    return .{
+        0x3e, value >> 8,   0x32, 0x00, 0xd0,
+        0x3e, value & 0xff, 0x32, 0x01, 0xd0,
+        0x3e, reg,          0x32, 0x02, 0xd0,
+    };
+}
 
 /// Two bytes per command, big end first, read through the *data* view of the
 /// encrypted ROM — so a driver that fetched them as opcodes would get other
@@ -935,6 +954,7 @@ fn soundDriver() [z80_bytes]u8 {
         0x32,
         0x02,
         0xd0,
+    } ++ setReg(qs_end, qs_end_value) ++ setReg(qs_loop, qs_loop_value) ++ setReg(qs_pan, qs_pan_value) ++ [_]u8{
         // volume, last
         0x3e,
         qs_volume_value >> 8,
@@ -987,6 +1007,7 @@ const sound_board_file = std.fmt.comptimePrint(
     \\kabuki = 0x{x} 0x{x} 0x{x} 0x{x}
     \\program = 0x000000 0x{x} word sound.rom
     \\audio   = 0x000000 0x{x} byte sound.z80
+    \\qsound  = 0x000000 0x{x} byte sound.pcm
     \\
 , .{
     sound_key.swap1,
@@ -995,7 +1016,22 @@ const sound_board_file = std.fmt.comptimePrint(
     sound_key.xor,
     program_bytes,
     z80_bytes,
+    qsound_bytes,
 });
+
+/// A sample ROM for the chip to play: one whole power of two, so the address
+/// mask is the ROM itself, and busy enough that a channel which stops walking
+/// it stops sounding like anything.
+const qsound_bytes = 0x10000;
+
+fn sampleRom() [qsound_bytes]u8 {
+    var pcm: [qsound_bytes]u8 = undefined;
+    for (&pcm, 0..) |*b, i| {
+        const ramp: u8 = @truncate(i >> 6);
+        b.* = if (i / 12 % 2 == 0) ramp else ramp ^ 0xc0;
+    }
+    return pcm;
+}
 
 fn writeSoundSet(dir: std.Io.Dir) !void {
     var region: [program_bytes]u8 = @splat(romset.blank);
@@ -1009,6 +1045,9 @@ fn writeSoundSet(dir: std.Io.Dir) !void {
 
     const z80_rom = encryptedDriver(sound_key);
     try dir.writeFile(testing.io, .{ .sub_path = "sound.z80", .data = &z80_rom });
+
+    const pcm = sampleRom();
+    try dir.writeFile(testing.io, .{ .sub_path = "sound.pcm", .data = &pcm });
     try dir.writeFile(testing.io, .{ .sub_path = "sound.board", .data = sound_board_file });
 }
 
@@ -1057,11 +1096,11 @@ test "a sound driver takes a command from the 68000 and sets a channel up" {
     // handshake would do the whole thing again every line.
     var buf: [qsound.log_len]qsound.Write = undefined;
     const log = c.sound.q.recent(&buf);
-    try testing.expectEqual(@as(usize, 4), log.len);
-    for ([_]u8{ qs_bank, qs_start, qs_pitch, qs_volume }, log) |reg, write| {
+    try testing.expectEqual(@as(usize, 7), log.len);
+    for ([_]u8{ qs_bank, qs_start, qs_pitch, qs_end, qs_loop, qs_pan, qs_volume }, log) |reg, write| {
         try testing.expectEqual(reg, write.reg);
     }
-    try testing.expectEqual(@as(u64, 4), c.sound.q.writes);
+    try testing.expectEqual(@as(u64, 7), c.sound.q.writes);
 }
 
 test "the sound board runs at its own speed, and the pipeline runs at the machine's" {
@@ -1100,4 +1139,71 @@ test "the sound board runs at its own speed, and the pipeline runs at the machin
     const per_frame = @as(u64, audio.sample_rate) * scheduler.refresh_den / scheduler.refresh_num;
     const want_frames = per_frame * sound_frames;
     try testing.expect(frames > want_frames - 8 and frames < want_frames + 8);
+}
+
+// -------------------------------------------------- M4: the chip on that board
+
+// M4's acceptance (DESIGN.md §9): the channel the M3 driver sets up actually
+// plays, out of a sample ROM, through the pan and echo path, and the mute a
+// debugger reaches for takes a voice out of the mix without taking it out of
+// the ROM. How far the chip is from the hardware is not measured here — that
+// is test/qsound_ref_test.zig, sample by sample against qsound-hle. What is
+// pinned here is that the whole machine still makes the same audio.
+
+/// What came out of the machine: every frame hashed, and the loudest either
+/// channel got. The hash is the regression — any change to the chip moves it —
+/// and the peak is what makes a broken pin readable, because silence and noise
+/// fail it the same way otherwise.
+const Audio = struct { frames: u64, hash: u64, peak: u32 };
+
+fn listen(c: *cps.Cps, cpu: *scheduler.Cpu, frames: usize) Audio {
+    var h = std.hash.Wyhash.init(0);
+    var heard = Audio{ .frames = 0, .hash = 0, .peak = 0 };
+    for (0..frames) |_| {
+        scheduler.runFrame(c, cpu);
+        while (c.mixer.pop()) |f| {
+            h.update(std.mem.asBytes(&f));
+            heard.frames += 1;
+            heard.peak = @max(heard.peak, @max(@abs(@as(i32, f.l)), @abs(@as(i32, f.r))));
+        }
+    }
+    heard.hash = h.final();
+    return heard;
+}
+
+const pinned_audio = Audio{ .frames = 4022, .hash = 0x095df9257b600c82, .peak = 11828 };
+
+test "the chip plays the channel the driver set up, and a mute takes it out" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const b, var rom = try loadSoundSet(&tmp);
+    defer rom.deinit(testing.allocator);
+
+    const c = try testing.allocator.create(cps.Cps);
+    defer testing.allocator.destroy(c);
+    c.* = .{ .board = b, .rom = rom };
+
+    var cpu: scheduler.Cpu = .{};
+    scheduler.reset(c, &cpu);
+    c.inputs.pad[0] = sound_command_value;
+
+    const heard = listen(c, &cpu, sound_frames);
+    try testing.expectEqual(pinned_audio, heard);
+
+    // The voice is where the walk left it, not where the driver pointed it.
+    try testing.expect(c.sound.q.voice[0].addr != sound_command_value);
+
+    // Muting takes it out of the mix and out of the echo, and leaves it
+    // walking the ROM — the point of a debug mute is that the rest of the
+    // machine does not notice. One frame for the delay lines to drain first.
+    const walked = c.sound.q.voice[0].addr;
+    c.sound.q.muted = 1;
+    _ = listen(c, &cpu, 1);
+    const quiet = listen(c, &cpu, sound_frames);
+    try testing.expectEqual(@as(u32, 0), quiet.peak);
+    try testing.expect(c.sound.q.voice[0].addr != walked);
+
+    // And unmuting brings it straight back.
+    c.sound.q.muted = 0;
+    try testing.expect(listen(c, &cpu, sound_frames).peak > 0);
 }

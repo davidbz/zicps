@@ -392,7 +392,10 @@ directly from documented behaviour, rather than a DSP16A core running the mask
 ROM. The reason is not effort but redistribution — an LLE needs an 8 KiB program
 ROM that cannot be committed or fetched, which would make the entire audio path
 skip on any machine that does not already own one. Verification is differential
-instead (§9 M4).
+instead (§9 M4). What the mask ROM holds besides program — the
+three mix curves and the five FIR coefficient sets — is committed, in
+`qsound_rom.zig`: those are as much a fact of the chip as its sample rate, and
+without them there is no pan/FIR path to write.
 
 ### 7.4 What is quoted rather than measured
 
@@ -717,6 +720,60 @@ Acceptance: a published deviation table per case (channel playback, looping,
 pitch, panning, echo), audio hashes pinned in the regression suite, and every
 deviation either fixed or named as a deliberate one with its reason.
 
+**Measured.** Five register logs, driven into this core and into qsound-hle one
+sample at a time, compared on both channels and on the busy flag a driver spins
+on (`test/qsound_ref_test.zig`, against commit `68e63be`):
+
+| case             | samples | differing | worst deviation |
+| ---------------- | ------: | --------: | --------------: |
+| channel playback |    1007 |         0 |               0 |
+| looping          |    1408 |         0 |               0 |
+| pitch            |    1110 |         0 |               0 |
+| panning          |    1545 |         0 |               0 |
+| echo             |    2410 |         0 |               0 |
+
+Nothing deviates on any path a board reaches, so the tolerance in the harness is
+zero rather than a figure: a difference of one is a failure. Every deviation
+named below is off those paths and is there on purpose.
+
+**Ceilings left behind.** The one that changed the shape of the project first:
+about two kilobytes of the DL-1425's mask ROM is committed, in
+`src/qsound_rom.zig`. §7.3 rules out running that ROM because the 8 KiB of
+*program* in it cannot be redistributed, and that reasoning does not carry to
+the coefficients beside it — the three mix curves and the five FIR sets are as
+much a fact of the chip as its sample rate, and without them there is no
+pan/FIR path to write at all. So they are committed, with their BSD-3
+attribution, and the emulator plays on a fresh checkout. qsound-hle itself stays
+what §11 calls it: a test-time reference, fetched and never linked in.
+
+What M4 deliberately does not do, and why:
+
+- **The three ADPCM channels are absent**, as §7.3 rules. Their registers are
+  not decoded, so a driver that wrote them would hear nothing rather than hear
+  something wrong. No known board writes them.
+- **Filter mode 2 falls back to mode 1.** §7.3 rules it out too. The state
+  register is decoded, so a driver that asks for it shows up as `next_state`
+  reading `init2` rather than as silence, and the dry path simply keeps the one
+  filter instead of gaining a second.
+- **A filter register pointing at nothing leaves the filter as it was.** The
+  reference divides a signed offset to find its table, so addresses just under
+  the first one wrap to it and load table 0; this returns nothing there. No
+  driver points a filter at the DSP's own variables, which is what that range
+  is, and the two agree on every address that names a real table.
+- **A filter table shorter than 95 taps is zero-padded** rather than read off
+  the end of the ROM image, which is what the reference does. Only a register
+  pointing into the last 94 entries of the overlap run can reach it.
+- **Per-channel mute is not on the chip at all.** It is a debugging control, so
+  it sits outside the differential: a muted voice still walks the sample ROM and
+  still costs what it costs, and contributes zero to both the mix and the echo
+  send. Unmuting it puts it back where the walk left it, not where the driver
+  pointed it.
+- **The busy flag is modelled on the DSP's own turn, not its clock.** It drops
+  on every register write and comes back when the chip finishes a sample, which
+  is what a driver's spin loop waits for; combined with M3's per-line sampling,
+  a driver waits about a scanline per register write, which is the shape of the
+  hardware rather than its exact count.
+
 ### M5: Frontend shell
 
 Deliverables: the idle snow; set loading by browser, drag-and-drop and command
@@ -805,6 +862,8 @@ Audio:
 - qsound-hle: the disassembled DSP program, ctr's from-scratch implementation,
   and the original patents. BSD-3, test-only, the differential reference:
   https://github.com/ValleyBell/qsound-hle
+  Its transcription of the DL-1425 coefficient tables is redistributed under
+  that licence in `src/qsound_rom.zig` (§9 M4); the code itself is not.
 - MAME's `qsound.cpp`, the low-level model that runs the real DSP program, for
   the host-side command and ready-flag handshake.
 

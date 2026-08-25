@@ -178,7 +178,7 @@ pub fn reset(c: *cps.Cps, cpu: *m68k.Cpu) void {
     Core.reset(cpu, c);
 
     soundboard.reset(&c.sound);
-    soundboard.load(&c.sound, c.rom.audio, c.board.kabuki);
+    soundboard.load(&c.sound, c.rom.audio, c.rom.qsound, c.board.kabuki);
 }
 
 /// Everything a frame can have changed, in one number: what `--frames N` prints
@@ -201,6 +201,12 @@ pub fn hash(c: *const cps.Cps, cpu: *const m68k.Cpu) u64 {
     // the rails diverges here frames before anything else notices.
     h.update(std.mem.sliceAsBytes(&c.sound.shared));
     h.update(std.mem.sliceAsBytes(&c.sound.q.regs));
+    // And the chip's own state, not only what was written at it: a voice that
+    // has walked to the wrong place in the sample ROM is a divergence the
+    // register file cannot see.
+    h.update(std.mem.sliceAsBytes(&c.sound.q.voice));
+    h.update(std.mem.sliceAsBytes(&c.sound.q.pan));
+    h.update(std.mem.asBytes(&c.sound.q.out));
     h.update(std.mem.asBytes(&c.sound.cpu.pc));
     h.update(std.mem.asBytes(&c.sound.cpu.cycles));
     return h.final();

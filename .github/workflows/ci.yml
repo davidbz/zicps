@@ -70,15 +70,22 @@ jobs:
           restore-keys: |
             zig-${{ runner.os }}-${{ matrix.zig }}-
             zig-${{ runner.os }}-
-      # Nothing to fetch yet: the in-repo test ROM arrives with M1 and the
-      # QSound differential reference with M4. Both fetches belong here, ahead
-      # of `check`, because each suite skips itself when its data is missing —
-      # a fetch that runs late is a green build that tested less than it looks.
+      # The QSound reference is the only thing CI fetches, and the only suite
+      # that skips itself when its data is missing (DESIGN.md §9 M4), so it
+      # runs ahead of `check`: a fetch that ran late would be a green build
+      # that tested less than it looks. The video milestones score against an
+      # acceptance ROM that is not fetched at all — test/system_test.zig
+      # assembles it — so there has never been a second fetch to put here.
+      - name: Fetch the QSound differential reference
+        shell: bash
+        run: ./tools/fetch_qsound_reference.sh
       - name: Compile check
         run: zig build check
       - name: Run tests
         run: zig build test
 
   # zigesis ran Nemesis' VDPFIFOTesting as a second job here, pinning a score
-  # per page and failing when one moved in either direction. Its analogue is
-  # M2's: the in-repo test ROM, walked headless, scored the same way.
+  # per page and failing when one moved in either direction. Its analogue needs
+  # no job of its own: the scoreboard over the in-repo test ROM is a test like
+  # any other, so `zig build test` above already runs it. `zig build testrom`
+  # is that one test by itself, for reading the table when a score moves.

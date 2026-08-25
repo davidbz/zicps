@@ -43,6 +43,15 @@ which fails when any page of it draws a pixel more or less than it used to:
 zig build testrom
 ```
 
+The QSound core is checked by diffing it against ctr's `qsound-hle`, sample by
+sample. That reference is a separate download and is not committed; fetch it
+first, and `zig build test` picks it up from then on:
+
+```
+./tools/fetch_qsound_reference.sh
+zig build qsound-ref
+```
+
 Once there's a window to open, Linux will also need the usual X11/GL packages
 for [raylib](https://www.raylib.com/); that arrives with the frontend milestone.
 
