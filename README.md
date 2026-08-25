@@ -3,25 +3,41 @@
 A Capcom CP System 1.5 (CPS Dash) arcade emulator, written in Zig.
 
 It emulates the whole board: the 68000, the encrypted Z80 sound CPU, the CPS-A
-and CPS-B-21 video chips, the QSound DSP, the control panel, save states and the
-board's own settings EEPROM — plus a small, friendly desktop app to play in.
+and CPS-B-21 video chips, the QSound DSP, the control panel and the settings
+EEPROM — plus a small, friendly desktop app to play in.
 
-zicps doesn't ship with any games. To run a board you supply your own legally
-obtained ROM set, and zicps supplies the **board file** that says how to read
-it — or you write your own.
+zicps doesn't ship any games. You'll need your own legally obtained ROM set to
+run anything.
+
+## What it can do
+
+- Runs CPS-1 and CPS-1.5 sets, from a zip or a directory of chip images, with
+  accurate video and QSound audio.
+- Ships a board file for nearly every set MAME lists, so `zicps sf2.zip` just
+  runs with nothing to configure.
+- Keeps the board's own settings in a file beside your set, so what you set in
+  its service menu is still there next time.
+- Drag-and-drop and menu-based loading, pause, fast-forward, frame advance,
+  screenshots, fullscreen, CRT-style scanline overlay.
+- Rebindable keys for two players, on a 3- or 6-button panel.
+- Deterministic enough to record a run and replay it frame for frame, and to
+  render with no window at all and hash the result.
+
+A few things aren't supported: CPS-1 boards with the older YM2151 + ADPCM sound
+hardware (those sets run silent), CP System II, save states, netplay and cheats.
 
 ## The board file
 
-On a real CPS-1.5 board, the video-chip register mapping, the graphics bank
-table and the sound CPU's decryption key don't live in the ROMs — they live in
-RAM held up by a battery. When the battery dies the board keeps every chip and
+On a real CPS-1.5 board the video-chip register mapping, the graphics bank table
+and the sound CPU's decryption key don't live in the ROMs — they live in RAM
+held up by a battery. When the battery dies the board keeps every chip and
 forgets how to be itself; that's what people mean when they call these boards
 "suicidal".
 
 zicps models that battery as plain `key = value` text you can read and edit,
 holding exactly what the battery held. One ships for nearly every CPS-1/1.5 set
 MAME lists, under [`boards/`](boards/), transcribed from MAME's published tables
-and embedded in the binary — so `zicps sf2.zip` just runs.
+and embedded in the binary.
 
 Three places are looked at, in this order, and the first one found wins:
 
@@ -31,41 +47,79 @@ Three places are looked at, in this order, and the first one found wins:
    names it.
 
 No board file anywhere, no boot — and if the one you have is wrong, zicps says
-what it needed rather than drawing garbage. The shipped ones are a convenience,
-not an authority: most have never been booted by anyone here, and outside the
-QSound sets they carry no sound at all. See [`boards/README.md`](boards/README.md).
+what it needed rather than drawing garbage. See
+[`boards/README.md`](boards/README.md).
 
-## Status
+## Getting started
 
-Early, but it runs. The design is written ([`DESIGN.md`](DESIGN.md)) and the
-emulator is being built against it, milestone by milestone: the machine, the
-video chips, the sound board, QSound and the frontend are in, and a real board's
-ROM set boots to its attract mode. Save states are next, and nobody has yet sat
-down and played one through — that sweep is a milestone of its own.
+You'll need [Zig](https://ziglang.org/) 0.16.0. On Linux you'll also need a few
+system libraries so [raylib](https://www.raylib.com/) can open a window:
 
-## Running
+```
+sudo apt-get install libgl1-mesa-dev libx11-dev libxrandr-dev \
+  libxinerama-dev libxcursor-dev libxi-dev libxext-dev
+```
+
+(macOS and Windows don't need anything extra.) Then build it:
+
+```
+zig build
+```
+
+And run it, pointing at your set:
 
 ```
 zig build run -- path/to/your-set.zip
 ```
 
-With no argument it opens on a dead channel; drop a set on the window, press
-any key for the menu, or use `Load Set`. Escape opens the menu, F1 is the
-board's test switch, 5 inserts a coin and Enter starts. Every key is rebindable
-from `Options → Keys`, and everything you change is written back to
+Started without a set, zicps idles on a dead channel until you drop one on the
+window or pick one from the menu.
+
+## Controls
+
+| Key | Does |
+|-----|------|
+| Arrows | Joystick |
+| A / S / D | Buttons 1 / 2 / 3 |
+| Q / W / E | Buttons 4 / 5 / 6 (6-button panel only) |
+| 5 / 6 | Insert a coin, player 1 / 2 |
+| Enter / 2 | Start, player 1 / 2 |
+| 9 | Service |
+| F1 | Test switch — the board's own settings menu |
+| Esc | Menu (and back out of it) |
+| O | Load set |
+| P | Pause |
+| Space | Scanlines |
+| F5 | Reset |
+| F8 | Advance one frame (and pause) |
+| F11 | Fullscreen |
+| F12 | Screenshot |
+| Tab (held) | Fast-forward, 4x |
+
+Every key is rebindable from Options → Keys, including the second player
+(unbound by default). The menu works on arrow keys and Enter.
+
+A QSound board has no DIP switches, so F1 is the only door into its settings.
+Those settings are written next to your set (`game.zip.nv`), and screenshots
+land there too. Everything you change in the menu is written back to
 `zicps/config.ini` in your config directory.
 
-## Building
-
-You'll need [Zig](https://ziglang.org/) 0.16.0. On Linux, raylib needs the
-usual X11 and GL headers:
+## Command line
 
 ```
-sudo apt install libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev \
-                 libxcursor-dev libxi-dev libxext-dev
+zicps [rom-set] [options]
+
+  --board <path>     the board file (default: the set's path with .board)
+  --frames N         run N frames with no window and print a state hash
+  --replay <path>    drive the controls from a recorded input log
+  --record <path>    write every frame's controls to an input log
+  --hash             print a hash every frame, not only the last
 ```
 
-The tests need none of that — they build the emulator without a display:
+## Tests
+
+The tests build the emulator without a display, so they need none of the
+system libraries above:
 
 ```
 zig build test
@@ -87,21 +141,26 @@ first, and `zig build test` picks it up from then on:
 zig build qsound-ref
 ```
 
-## What it won't do
-
-CPS-1 boards with the older YM2151 + ADPCM sound hardware, CP System II,
-netplay, cheats, shader pipelines, and per-game databases of any kind.
-
 ## References
 
-zicps is built on [z68k](https://github.com/davidbz/z68k) and
+zicps is built on top of [z68k](https://github.com/davidbz/z68k) and
 [z80](https://github.com/davidbz/z80), conformance-tested 68000 and Z80 cores,
-and reuses the frontend and engineering standards of
-[zigesis](https://github.com/davidbz/zigesis). It leans on some excellent
-community research, all credited in [`DESIGN.md`](DESIGN.md).
+and leans on some excellent community research:
+
+- [MAME](https://github.com/mamedev/mame)'s Capcom driver — the CPS-B-21
+  register mappings and Kabuki keys the board files are transcribed from.
+- [jtcps1](https://github.com/jotego/jtcores) — Jotego's hardware-verified FPGA
+  core for this board family.
+- [Fabien Sanglard's CPS-1 graphics study](https://fabiensanglard.net/cps1_gfx/)
+  and [CCPS](https://fabiensanglard.net/ccps/), the SDK this project builds its
+  own test ROM with.
+- [ArcadeHacker's CPS-1 series](http://arcadehacker.blogspot.com/2015/04/capcom-cps1-part-1.html)
+  — the batteries, the CPS-B-21 configuration and the Kabuki keys.
+- [qsound-hle](https://github.com/ValleyBell/qsound-hle) — ctr and ValleyBell's
+  from-scratch DSP implementation, used to check the QSound core.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE). The board files under `boards/` are
-transcribed from MAME's CPS-1 driver and carry its BSD-3-Clause terms; see
+MIT. See [`LICENSE`](LICENSE). The board files under `boards/` are transcribed
+from MAME's CPS-1 driver and carry its BSD-3-Clause terms; see
 [`boards/README.md`](boards/README.md).
