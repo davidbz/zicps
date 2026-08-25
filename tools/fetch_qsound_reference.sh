@@ -15,6 +15,16 @@ commit=68e63be325ddce6288adc3f571a4647f634046fb
 base=https://raw.githubusercontent.com/ValleyBell/qsound-hle/$commit
 into=$(cd "$(dirname "$0")/.." && pwd)/testdata/qsound-hle
 
+# macOS has no sha256sum and Git Bash on Windows does, so ask for whichever
+# is here rather than assuming coreutils.
+digest() {
+    if command -v sha256sum > /dev/null; then
+        sha256sum "$1" | cut -d " " -f 1
+    else
+        shasum -a 256 "$1" | cut -d " " -f 1
+    fi
+}
+
 sums="\
 d3f60b342cdedad77f9d50fc40e0aadd364e5130cd0ed2ded9964974a38fec2e  qsound.c
 ebd8b6b54b464d61eae9cc3b144b502713ce4255369134ae3c044d64c4a3af56  qsound.h
@@ -24,11 +34,11 @@ mkdir -p "$into"
 while read -r sum name; do
     echo "fetching $name"
     curl -fsSL "$base/$name" -o "$into/$name.part"
-    echo "$sum  $into/$name.part" | sha256sum --check --status || {
+    if [ "$(digest "$into/$name.part")" != "$sum" ]; then
         rm -f "$into/$name.part"
         echo "checksum mismatch on $name: refusing it" >&2
         exit 1
-    }
+    fi
     mv "$into/$name.part" "$into/$name"
 done <<< "$sums"
 

@@ -70,10 +70,13 @@ jobs:
           restore-keys: |
             zig-${{ runner.os }}-${{ matrix.zig }}-
             zig-${{ runner.os }}-
-      # Nothing to fetch yet: the in-repo test ROM arrives with M1 and the
-      # QSound differential reference with M4. Both fetches belong here, ahead
-      # of `check`, because each suite skips itself when its data is missing —
-      # a fetch that runs late is a green build that tested less than it looks.
+      # The QSound differential reference is not committed (DESIGN.md §9 M4),
+      # and the suite skips itself when it is missing, so this runs ahead of
+      # `check` — a fetch that runs late is a green build that tested less than
+      # it looks. M2's test ROM needs no fetch: the suite builds it.
+      - name: Fetch the QSound differential reference
+        shell: bash
+        run: ./tools/fetch_qsound_reference.sh
       - name: Compile check
         run: zig build check
       - name: Run tests
