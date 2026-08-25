@@ -54,7 +54,7 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
     var src = try open(gpa, io, parent, path, diag);
     defer src.close();
 
-    var sizes: [4]u64 = @splat(0);
+    var sizes: [board.region_count]u64 = @splat(0);
     for (b.romList()) |rom| {
         const end = rom.mode.extent(rom.dest, rom.len);
         const i = @intFromEnum(rom.region);
@@ -98,13 +98,22 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
     return .{ .program = program, .gfx = gfx, .audio = audio, .qsound = qsound };
 }
 
-fn cap(sizes: *[4]u64, diag: *Diag) Error!void {
-    const limits = [4]u64{ max_program, max_gfx, max_audio, max_qsound };
-    for (sizes, limits, 0..) |size, limit, i| {
-        if (size <= limit) continue;
+fn cap(sizes: *[board.region_count]u64, diag: *Diag) Error!void {
+    for (sizes, 0..) |size, i| {
         const region: board.Region = @enumFromInt(i);
-        return fail(diag, "the board file fills 0x{x} bytes of {s} ROM; no board holds more than 0x{x}", .{ size, @tagName(region), limit });
+        const max = limit(region);
+        if (size <= max) continue;
+        return fail(diag, "the board file fills 0x{x} bytes of {s} ROM; no board holds more than 0x{x}", .{ size, @tagName(region), max });
     }
+}
+
+fn limit(region: board.Region) u64 {
+    return switch (region) {
+        .program => max_program,
+        .gfx => max_gfx,
+        .audio => max_audio,
+        .qsound => max_qsound,
+    };
 }
 
 fn alloc(gpa: std.mem.Allocator, len: u64) Error![]u8 {

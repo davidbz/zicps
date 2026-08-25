@@ -3,11 +3,11 @@
 //! the backbone of testing rather than a debug feature, which is why it is the
 //! first thing that exists and has to keep working forever.
 //!
-//! The window arrives at M5. This is also the only file allowed to reach raylib
-//! when it does, and the build graph is what enforces that rather than anyone
-//! remembering.
+//! This is also the only file allowed to reach raylib when the window arrives,
+//! and the build graph is what enforces that rather than anyone remembering.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const board = @import("board");
 const romset = @import("romset");
 const cps = @import("cps");
@@ -63,51 +63,76 @@ fn fail() noreturn {
     std.process.exit(1);
 }
 
+/// The command line, once. Every refusal here has already said what was wrong,
+/// so nothing in this struct needs checking again.
+const Options = struct {
+    set: []const u8,
+    board: ?[]const u8 = null,
+    replay: ?[]const u8 = null,
+    frames: ?u32 = null,
+    every_frame: bool = false,
+};
+
+/// The value an option takes, or a message and no exit code worth reading a
+/// stack trace for.
+fn value(args: *std.process.Args.Iterator, flag: []const u8) []const u8 {
+    return args.next() orelse {
+        std.debug.print("{s} wants a value after it\n", .{flag});
+        fail();
+    };
+}
+
+/// `--help` prints and exits rather than returning, so the caller has an
+/// `Options` or nothing.
+fn parseArgs(args: *std.process.Args.Iterator) Options {
+    // Empty until the set is given, which an empty argument could not name
+    // anyway.
+    var o = Options{ .set = "" };
+
+    _ = args.skip();
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--help")) {
+            usage();
+            std.process.exit(0);
+        } else if (std.mem.eql(u8, arg, "--hash")) {
+            o.every_frame = true;
+        } else if (std.mem.eql(u8, arg, "--board")) {
+            o.board = value(args, arg);
+        } else if (std.mem.eql(u8, arg, "--replay")) {
+            o.replay = value(args, arg);
+        } else if (std.mem.eql(u8, arg, "--frames")) {
+            const count = value(args, arg);
+            o.frames = std.fmt.parseInt(u32, count, 10) catch {
+                std.debug.print("--frames wants a number of frames, got `{s}`\n", .{count});
+                fail();
+            };
+        } else if (o.set.len == 0) {
+            o.set = arg;
+        } else {
+            std.debug.print("ignoring extra argument {s}\n", .{arg});
+        }
+    }
+
+    if (o.set.len == 0) {
+        usage();
+        fail();
+    }
+    return o;
+}
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
 
     var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
     defer args.deinit();
-    _ = args.skip();
-
-    var set_path: ?[]const u8 = null;
-    var board_path: ?[]const u8 = null;
-    var replay_path: ?[]const u8 = null;
-    var frames: ?u32 = null;
-    var every_frame = false;
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "--frames")) {
-            const count = args.next() orelse return error.MissingFrameCount;
-            frames = std.fmt.parseInt(u32, count, 10) catch {
-                std.debug.print("--frames wants a number of frames, got `{s}`\n", .{count});
-                fail();
-            };
-        } else if (std.mem.eql(u8, arg, "--board")) {
-            board_path = args.next() orelse return error.MissingBoardPath;
-        } else if (std.mem.eql(u8, arg, "--replay")) {
-            replay_path = args.next() orelse return error.MissingReplayPath;
-        } else if (std.mem.eql(u8, arg, "--hash")) {
-            every_frame = true;
-        } else if (std.mem.eql(u8, arg, "--help")) {
-            usage();
-            return;
-        } else if (set_path == null) {
-            set_path = arg;
-        } else {
-            std.debug.print("ignoring extra argument {s}\n", .{arg});
-        }
-    }
-
-    const set = set_path orelse {
-        usage();
-        fail();
-    };
+    const o = parseArgs(&args);
+    const set = o.set;
 
     // The board file lives beside the set under the set's own name, whether the
     // set is a directory or a zip.
     var default_board: [std.fs.max_path_bytes]u8 = undefined;
-    const board_file = board_path orelse try beside(&default_board, set, ".board");
+    const board_file = o.board orelse try beside(&default_board, set, ".board");
 
     var diag = board.Diag{};
     const cwd = std.Io.Dir.cwd();
@@ -140,11 +165,11 @@ pub fn main(init: std.process.Init) !void {
     var cpu: scheduler.Cpu = .{};
     scheduler.reset(c, &cpu);
 
-    const n = frames orelse {
+    const n = o.frames orelse {
         std.debug.print("the window arrives at M5; for now, run with --frames N\n", .{});
         fail();
     };
-    try headless(io, gpa, c, &cpu, n, replay_path, every_frame);
+    try headless(io, gpa, c, &cpu, n, o.replay, o.every_frame);
 }
 
 fn headless(
@@ -210,7 +235,14 @@ fn report(c: *const cps.Cps, cpu: *const scheduler.Cpu, sound: *const Sound, fra
 /// `sets/dino.zip`, `sets/dino` and the `sets/dino/` a shell completes a
 /// directory to all look beside themselves for `sets/dino.board`.
 fn beside(buf: []u8, path: []const u8, suffix: []const u8) ![]const u8 {
-    const trimmed = std.mem.trimEnd(u8, path, std.fs.path.sep_str);
+    // What basename splits on, which on Windows is both slashes and not just
+    // `sep_str`. A backslash is a legal character in a POSIX file name, so the
+    // set only widens where it really is a separator.
+    const seps = if (builtin.os.tag == .windows)
+        std.fs.path.sep_str_windows ++ std.fs.path.sep_str_posix
+    else
+        std.fs.path.sep_str_posix;
+    const trimmed = std.mem.trimEnd(u8, path, seps);
     const name = std.fs.path.basename(trimmed);
     const dot = std.mem.lastIndexOfScalar(u8, name, '.') orelse
         return std.fmt.bufPrint(buf, "{s}{s}", .{ trimmed, suffix });

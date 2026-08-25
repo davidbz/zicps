@@ -97,6 +97,9 @@ pub const bank_shift = 16;
 pub const phase_bits = 12;
 pub const phase_max = 0x7ffffff;
 pub const phase_min = -0x8000000;
+/// The fraction is held in a 16-bit register with its 12 bits at the top, so it
+/// is shifted this far to get at them.
+pub const phase_pad = 16 - phase_bits;
 
 /// The volume register is 2.14: 0x4000 is unity, and the chip keeps the top
 /// bits of the product.
@@ -112,6 +115,7 @@ pub const pan_entries = 98;
 pub const pan_max = pan_entries - 1;
 pub const pan_dry = 0;
 pub const pan_wet = 1;
+pub const pan_paths = 2;
 
 /// The echo's delay line is addressed from a fixed point in DSP memory, so the
 /// register a driver writes is an end address and the length is the difference.
@@ -132,6 +136,11 @@ pub const filter_right = 0xe11;
 /// The DSP's own round-to-nearest, applied to the 16.16 accumulator before the
 /// top half is taken.
 pub const dsp_round = 0x8000;
+
+/// Every product the program forms reaches the accumulator two bits up from
+/// where the multiplier leaves it. Named because it is on the mix, the echo,
+/// the pan filter and the output delays alike, and it is one fact, not four.
+pub const dsp_product_shift = 2;
 
 /// The program's entry points, as the addresses a driver writes to the state
 /// register to reach them. The chip powers up at none of them, which is the
@@ -417,7 +426,7 @@ fn mix(q: *Qsound) void {
     for (&q.voice, &heard, 0..) |*v, *out, i| {
         const played = step(q, v);
         out.* = if (q.muted & @as(u16, 1) << @intCast(i) != 0) 0 else played;
-        echo_in +%= (@as(i32, out.*) * v.echo) << 2;
+        echo_in +%= (@as(i32, out.*) * v.echo) << dsp_product_shift;
     }
     const echoed = echoStep(&q.echo, echo_in);
 
@@ -429,12 +438,12 @@ fn mix(q: *Qsound) void {
         var dry: i32 = if (ch == 0) @as(i32, echoed) << 16 else 0;
         for (heard, q.pan) |out, pan| {
             const p = panIndex(pan);
-            dry -%= (@as(i32, out) * pan_table[ch][pan_dry][p]) << 2;
-            wet -%= (@as(i32, out) * pan_table[ch][pan_wet][p]) << 2;
+            dry -%= (@as(i32, out) * pan_table[ch][pan_dry][p]) << dsp_product_shift;
+            wet -%= (@as(i32, out) * pan_table[ch][pan_wet][p]) << dsp_product_shift;
         }
 
         wet = firStep(&q.filter[ch], @truncate(wet >> 16));
-        const mixed = (delayStep(&q.wet[ch], wet) +% delayStep(&q.dry[ch], dry)) << 2;
+        const mixed = (delayStep(&q.wet[ch], wet) +% delayStep(&q.dry[ch], dry)) << dsp_product_shift;
         // Round to nearest and keep the top half. The program masks the low
         // sixteen bits off first, which an arithmetic shift already does.
         q.out[ch] = @truncate((mixed +% dsp_round) >> 16);
@@ -458,11 +467,11 @@ fn mix(q: *Qsound) void {
 fn step(q: *Qsound, v: *Voice) i16 {
     const played: i16 = @truncate((@as(i32, v.volume) * pcm(q, v.bank, v.addr)) >> volume_shift);
 
-    var at: i32 = @as(i32, v.rate) + ((@as(i32, v.addr) << phase_bits) | (v.phase >> 4));
+    var at: i32 = @as(i32, v.rate) + ((@as(i32, v.addr) << phase_bits) | (v.phase >> phase_pad));
     if (at >> phase_bits >= v.end_addr) at -= @as(i32, v.loop_len) << phase_bits;
     at = std.math.clamp(at, phase_min, phase_max);
     v.addr = @truncate(at >> phase_bits);
-    v.phase = @truncate(@as(u32, @bitCast(at)) << 4);
+    v.phase = @truncate(@as(u32, @bitCast(at)) << phase_pad);
     return played;
 }
 
@@ -485,7 +494,7 @@ fn echoStep(e: *Echo, input: i32) i16 {
     const averaged: i32 = (stored + e.last) >> 1;
     e.last = @truncate(stored);
 
-    e.line[at] = @truncate((input +% ((averaged * e.feedback) << 2)) >> 16);
+    e.line[at] = @truncate((input +% ((averaged * e.feedback) << dsp_product_shift)) >> 16);
     e.at += 1;
     if (e.at >= e.length) e.at = 0;
     return @truncate(averaged);
@@ -497,11 +506,11 @@ fn firStep(f: *Fir, input: i16) i32 {
     const wrap = f.tap_count - 1;
     var acc: i32 = 0;
     for (f.taps[0..wrap]) |tap| {
-        acc -%= (@as(i32, tap) * f.line[f.at]) << 2;
+        acc -%= (@as(i32, tap) * f.line[f.at]) << dsp_product_shift;
         f.at += 1;
         if (f.at >= wrap) f.at = 0;
     }
-    acc -%= (@as(i32, f.taps[wrap]) * input) << 2;
+    acc -%= (@as(i32, f.taps[wrap]) * input) << dsp_product_shift;
 
     f.line[f.at] = input;
     f.at += 1;
@@ -536,7 +545,7 @@ fn panIndex(pan: u16) usize {
 /// `pan_linear` the dry path switches to the linear curve and the wet path
 /// goes to zero, which is what mutes the filter and gives plain stereo.
 const pan_table = blk: {
-    var t: [channels][2][pan_entries]i16 = @splat(@splat(@splat(0)));
+    var t: [channels][pan_paths][pan_entries]i16 = @splat(@splat(@splat(0)));
     for (0..rom.pan_steps + 1) |i| {
         const mirrored = rom.pan_steps - i;
         t[0][pan_dry][i] = rom.dry_mix[i];

@@ -313,7 +313,6 @@ const color_mask = 0x1f;
 const flip_x_bit = 0x20;
 const flip_y_bit = 0x40;
 const priority_group_shift = 7;
-pub const priority_groups = 4;
 
 /// One tilemap layer, as data. The three instances below are the whole of what
 /// distinguishes scroll1 from scroll3.
