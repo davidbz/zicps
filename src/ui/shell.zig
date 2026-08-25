@@ -1,4 +1,4 @@
-//! The frontend shell (DESIGN.md §5.2): the menu, the file browser, the board
+//! The frontend shell: the menu, the file browser, the board
 //! card and the key-rebinding UI. Raylib primitives only, no widget library.
 //!
 //! `update` reads the keyboard and mouse and mutates the `Config` in place;
@@ -7,7 +7,7 @@
 //! machine, and nothing here knows where a file lives.
 //!
 //! This and `main.zig` are the only two modules that may reach raylib, and the
-//! build graph is what enforces that rather than anyone remembering (§3.2).
+//! build graph is what enforces that rather than anyone remembering.
 
 const std = @import("std");
 const config = @import("config");
@@ -22,7 +22,7 @@ pub const max_path = 512;
 const max_entries = 1024;
 const status_seconds = 4;
 
-/// A set is a directory of chip images or a zip of the same (§8.2), so the
+/// A set is a directory of chip images or a zip of the same, so the
 /// browser lists directories — every one of them, since any could be a set —
 /// and the one file extension a set can arrive as.
 const set_extension = ".zip";
@@ -85,7 +85,8 @@ pub const Row = struct {
 
 pub const Tone = enum { plain, good, bad };
 
-/// Save and load state are M6's; §5.2's menu gains their two rows with them.
+/// Save and load state are not implemented yet; the menu gains their two rows
+/// with them.
 const root_items = [_]Item{
     .{ .label = "Resume", .act = .close },
     .{ .label = "Load Set", .act = .{ .goto = .load } },
@@ -139,7 +140,7 @@ pub const Ui = struct {
     page: Page = .root,
     sel: usize = 0,
     /// Set when the menu changes an option, cleared by `main.zig` once the
-    /// config file has been rewritten. §5.1: options are written on change.
+    /// config file has been rewritten: options are written on change.
     dirty: bool = false,
     /// The action waiting for a key press, if the rebinding UI is up.
     rebind: ?Action = null,
@@ -362,7 +363,7 @@ fn repeat(key: c_int) bool {
 /// A file list, not a system dialog: raylib has no dialog, and a native one
 /// per platform is three dependencies for one button.
 ///
-/// Every directory is offered, because a set *is* a directory (§8.2) and there
+/// Every directory is offered, because a set *is* a directory and there
 /// is nothing about one that says so from the outside. Entering a directory and
 /// loading it are therefore two different keys.
 const Browser = struct {
@@ -619,7 +620,7 @@ pub fn draw(ui: *const Ui, cfg: *const Config) void {
     if (ui.page == .root) drawBoard(ui);
 }
 
-/// The right half of the root page (§5.2): what the set and the board file
+/// The right half of the root page: what the set and the board file
 /// turned out to say, as a cabinet would put it — a lit marquee with the set's
 /// name, and a scoreboard of readings under it. Every one of them comes out of
 /// the two files the user supplied and nothing is looked up anywhere, which is
@@ -651,21 +652,7 @@ fn drawBoard(ui: *const Ui) void {
         line += rowHeight();
 
         for (ui.card[0..ui.card_n]) |*row| {
-            rl.DrawText(&row.label, x + pad, line, small, dim);
-            // Values hang off the right edge like a score, which lines them up
-            // without the font having to be fixed-width. It is not. One that
-            // is too wide to hang there starts after its label instead and is
-            // cut on the right by the panel: sliding further left would put it
-            // under the label, and two strings in the same pixels are less
-            // readable than either of them alone.
-            const width = rl.MeasureText(&row.value, small);
-            const label_end = x + pad + rl.MeasureText(&row.label, small) + pad;
-            const value_x = @max(label_end, x + w - pad - width);
-            rl.DrawText(&row.value, value_x, line, small, switch (row.tone) {
-                .plain => fg,
-                .good => good,
-                .bad => bad,
-            });
+            drawCardRow(row, x, w, line, pad, small);
             line += rowHeight();
         }
     }
@@ -677,6 +664,23 @@ fn drawBoard(ui: *const Ui) void {
     drawName(title, x + pad, w - pad * 2, y + half(marquee - fs), fs, ink);
 }
 
+/// Values hang off the right edge like a score, which lines them up without the
+/// font having to be fixed-width. It is not. One that is too wide to hang there
+/// starts after its label instead and is cut on the right by the panel: sliding
+/// further left would put it under the label, and two strings in the same
+/// pixels are less readable than either of them alone.
+fn drawCardRow(row: *const Row, x: c_int, w: c_int, line: c_int, pad: c_int, small: c_int) void {
+    rl.DrawText(&row.label, x + pad, line, small, dim);
+
+    const width = rl.MeasureText(&row.value, small);
+    const label_end = x + pad + rl.MeasureText(&row.label, small) + pad;
+    const value_x = @max(label_end, x + w - pad - width);
+    rl.DrawText(&row.value, value_x, line, small, switch (row.tone) {
+        .plain => fg,
+        .good => good,
+        .bad => bad,
+    });
+}
 fn drawRow(y: c_int, selected: bool) void {
     if (!selected) return;
     rl.DrawRectangle(0, y - 2, rl.GetScreenWidth(), rowHeight(), .{ .r = 255, .g = 255, .b = 255, .a = 30 });
@@ -725,7 +729,7 @@ pub fn barHeight() c_int {
 /// The six buttons where they sit on a Capcom panel: 4 5 6 along the top, 1 2
 /// 3 under them — the same two rows the default bindings put QWE over ASD in.
 /// Row 0 is the half a three-button cabinet does not have, and it is drawn as
-/// empty sockets rather than left out (§5.2), so the panel is the same width
+/// empty sockets rather than left out, so the panel is the same width
 /// either way and nothing to its right moves when the option changes.
 const face_buttons = [_]struct { action: Action, col: c_int, row: c_int, label: [:0]const u8 }{
     .{ .action = .p1_b4, .col = 0, .row = 0, .label = "4" },
@@ -801,33 +805,37 @@ fn drawBar(ui: *const Ui, cfg: *const Config) void {
     const name_x = seam_x + fs;
     const floor = name_x + fs * name_floor_chars;
 
-    // Right to left, because everything on this side has a width of its own
-    // and the set's name is the one thing that can be cut short.
+    const right = drawBarRight(ui, cfg, w - gap, floor, ty, fs);
+
+    const name: [:0]const u8 = if (ui.card_n == 0) "NO SET" else std.mem.sliceTo(&ui.card_title, 0);
+    drawName(name, name_x, right - name_x, ty, fs, if (ui.card_n == 0) dim else marquee_ink);
+}
+
+/// The state readouts, laid out right to left from `right` because everything
+/// on this side has a width of its own and the set's name is the one thing
+/// that can be cut short. Answers where the name may run to.
+fn drawBarRight(ui: *const Ui, cfg: *const Config, right: c_int, floor: c_int, ty: c_int, fs: c_int) c_int {
+    var at = right;
     var buf: [32]u8 = undefined;
-    var right = w - gap;
     if (ui.paused) {
-        right = barIcon(right, ty, fs, .pause, hilite);
+        at = barIcon(at, ty, fs, .pause, hilite);
     } else if (std.fmt.bufPrintZ(&buf, "{d} FPS", .{rl.GetFPS()})) |fps| {
-        right = barField(right, ty, fs, fps, fps_field, dim);
+        at = barField(at, ty, fs, fps, fps_field, dim);
     } else |_| {}
-    if (!cfg.audio or cfg.volume == 0) right = barIcon(right, ty, fs, .mute, bad);
+    if (!cfg.audio or cfg.volume == 0) at = barIcon(at, ty, fs, .mute, bad);
 
     var key: [key_hint_buf]u8 = undefined;
     const fast_key = keyHint(cfg, .fast_forward, &key);
-    right = barHint(right, floor, ty, fs, .fast, fast_key, if (ui.fast) hilite else dim);
+    at = barHint(at, floor, ty, fs, .fast, fast_key, if (ui.fast) hilite else dim);
+
     var crt_key: [key_hint_buf]u8 = undefined;
     const crt = keyHint(cfg, .scanlines, &crt_key);
     const crt_ink = if (cfg.scanlines) hilite else dim;
     // Two hints and a name do not fit until the window is large, and this one
     // is a toggle: the mark alone still says whether it is on, so it sheds its
     // key rather than dropping off the bar.
-    right = if (right - hintWidth(fs, crt) >= floor)
-        barHint(right, floor, ty, fs, .crt, crt, crt_ink)
-    else
-        barIcon(right, ty, fs, .crt, crt_ink);
-
-    const name: [:0]const u8 = if (ui.card_n == 0) "NO SET" else std.mem.sliceTo(&ui.card_title, 0);
-    drawName(name, name_x, right - name_x, ty, fs, if (ui.card_n == 0) dim else marquee_ink);
+    if (at - hintWidth(fs, crt) >= floor) return barHint(at, floor, ty, fs, .crt, crt, crt_ink);
+    return barIcon(at, ty, fs, .crt, crt_ink);
 }
 
 /// The groove between the control panel and the marquee. A cabinet is built
@@ -862,7 +870,7 @@ fn drawName(name: [:0]const u8, x: c_int, box: c_int, y: c_int, fs: c_int, color
 }
 
 /// How far into its loop a marquee is. Wall-clock driven, which is fine
-/// because nothing here is the emulated machine — §6.3's determinism rule is
+/// because nothing here is the emulated machine — the determinism rule is
 /// about the core, and this is chrome.
 fn marqueeOffset(t: f64, span: c_int, fs: c_int) c_int {
     const travelled = t * marquee_rate * @as(f64, @floatFromInt(fs));
@@ -872,7 +880,7 @@ fn marqueeOffset(t: f64, span: c_int, fs: c_int) c_int {
 /// The frame rate is the one thing on the bar whose text changes every frame,
 /// and the whole right-hand side is laid out from its width — so it is drawn
 /// in a field wide enough for any reading rather than shrink-wrapped to the
-/// digits it happens to have (§5.2). Uncapped, the reading changes every
+/// digits it happens to have. Uncapped, the reading changes every
 /// frame, and a title whose width sits near where its box ends up otherwise
 /// flips between scrolling and standing still several times a second.
 const fps_field = "9999 FPS";
@@ -958,7 +966,7 @@ fn drawIcon(x: c_int, y: c_int, fs: c_int, icon: Icon, color: rl.Color) void {
 }
 
 /// The colour of a scanline: black, and light enough that a dark scene keeps
-/// its shadow detail. Alpha stripes, not a shader (§5.1).
+/// its shadow detail. Alpha stripes, not a shader.
 const scanline_ink = rl.Color{ .r = 0, .g = 0, .b = 0, .a = 90 };
 
 /// Where the stripes sit: `row` device pixels between them, `thick` of that
@@ -1011,7 +1019,7 @@ fn gridFont(want: c_int) c_int {
 /// same thing that says it on the cabinet.
 const button_label_floor = 13;
 
-/// The cabinet's control panel (§5.2), lit by the words the machine is being
+/// The cabinet's control panel, lit by the words the machine is being
 /// handed this frame — which makes it the fastest check there is that a binding
 /// does what it says, and during a replay it is the recorded input playing
 /// back. Returns its width.
@@ -1027,18 +1035,8 @@ fn drawPanel(x: c_int, y: c_int, h: c_int, pad: u16, panel_word: u8, six: bool) 
     const row_gap = @max(1, @divTrunc(inner, 12));
     const d = @divTrunc(inner - row_gap, 2); // one button, and half the panel tall
 
-    // The stick is one shape, not five tiles: an outlined plus in the panel's
-    // grey, with a whole arm lighting at a time. Its arms are drawn over the
-    // outline rather than inside it, which is what keeps it a single piece.
     const u = @divTrunc(inner, 3);
-    const edge = @max(1, @divTrunc(u, 8));
-    drawCross(x - edge, top - edge, u, edge, bezel);
-    drawCross(x, top, u, 0, chip);
-    for (stick_cells) |c| {
-        const a = c.action orelse continue;
-        if (!held(pad, a)) continue;
-        rl.DrawRectangle(x + c.col * u, top + c.row * u, u, u, hilite);
-    }
+    drawStick(x, top, u, pad);
 
     // The top row sits a third of a button to the left of the bottom one: the
     // six are an arc on a real panel, not a grid.
@@ -1068,6 +1066,20 @@ fn drawPanel(x: c_int, y: c_int, h: c_int, pad: u16, panel_word: u8, six: bool) 
         drawPill(pill_x, top + p.row * (d + row_gap), pill_w, d, p.label, pfs, litPanel(panel_word, p.action));
     }
     return pill_x + pill_w - x;
+}
+
+/// The stick is one shape, not five tiles: an outlined plus in the panel's
+/// grey, with a whole arm lighting at a time. Its arms are drawn over the
+/// outline rather than inside it, which is what keeps it a single piece.
+fn drawStick(x: c_int, top: c_int, u: c_int, pad: u16) void {
+    const edge = @max(1, @divTrunc(u, 8));
+    drawCross(x - edge, top - edge, u, edge, bezel);
+    drawCross(x, top, u, 0, chip);
+    for (stick_cells) |c| {
+        const a = c.action orelse continue;
+        if (!held(pad, a)) continue;
+        rl.DrawRectangle(x + c.col * u, top + c.row * u, u, u, hilite);
+    }
 }
 
 /// The five cells of the stick as one plus-shaped piece, `grow` pixels proud

@@ -156,7 +156,7 @@ pub const defaults: Bindings = blk: {
     b[@intFromEnum(Action.start1)] = key_enter;
     b[@intFromEnum(Action.start2)] = '2';
     // A QSound board has no DIP switches, so this is the only door into its
-    // settings (DESIGN.md §8.4).
+    // settings.
     b[@intFromEnum(Action.test_switch)] = key_f1;
     b[@intFromEnum(Action.menu)] = key_escape;
     b[@intFromEnum(Action.pause)] = 'P';
@@ -282,7 +282,7 @@ pub fn keyName(key: u32, buf: []u8) []const u8 {
     for (named) |n| {
         if (n[1] == key) return n[0];
     }
-    if (key > ' ' and key < 127) {
+    if (key > ' ' and key < std.ascii.control_code.del) {
         buf[0] = @intCast(key);
         return buf[0..1];
     }

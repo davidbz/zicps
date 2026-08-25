@@ -1,4 +1,4 @@
-//! The board files that ship with this build (DESIGN.md §8.1).
+//! The board files that ship with this build.
 //!
 //! A CPS-1 board keeps its configuration in battery-backed RAM, so a set on
 //! disk does not say how to run itself. Nobody has a board to read it off, and

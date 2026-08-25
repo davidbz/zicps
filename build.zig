@@ -8,11 +8,11 @@ pub fn build(b: *std.Build) void {
     const z80 = b.dependency("z80", .{ .target = target, .optimize = optimize });
 
     // Emulation and frontend-data modules, in dependency order. None of these
-    // may import raylib: DESIGN.md §3.2 makes that a property of the build
-    // graph rather than of anyone's discipline, and `main.zig` (with
-    // `ui/shell.zig` from M5) will be the only module that touches a display.
-    // A module can only reach what is wired into it here, so a stray
-    // `@import("raylib")` in the emulation core does not compile.
+    // may import raylib: that is a property of the build graph rather than of
+    // anyone's discipline, and `main.zig` and `ui/shell.zig` are the only
+    // modules that touch a display. A module can only reach what is wired into
+    // it here, so a stray `@import("raylib")` in the emulation core does not
+    // compile.
     const board = b.addModule("board", .{
         .root_source_file = b.path("src/board.zig"),
         .target = target,
@@ -109,7 +109,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "input", .module = input }},
     });
 
-    // The board files that ship with this build (DESIGN.md §8.1). The list is
+    // The board files that ship with this build. The list is
     // generated beside them and holds nothing but `@embedFile`s, so a board
     // file that changes rebuilds what carries it; everything that is not a
     // table lives in `src/boards.zig`.
@@ -170,15 +170,14 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    // The scoreboard of DESIGN.md §9: the acceptance ROM's pages, walked and
-    // scored, one line each. It is the system tests filtered down to that one
-    // test rather than a file of its own — the ROM that has to be built to run
-    // it is already there.
+    // The scoreboard: the acceptance ROM's pages, walked and scored, one line
+    // each. It is the system tests filtered down to that one test rather than a
+    // file of its own — the ROM that has to be built to run it is already there.
     const scoreboard = b.addTest(.{ .root_module = system_tests, .filters = &.{"scoreboard"} });
     const testrom_step = b.step("testrom", "Score every page of the acceptance ROM");
     testrom_step.dependOn(&b.addRunArtifact(scoreboard).step);
 
-    // The differential check of DESIGN.md §9 M4: the same register log driven
+    // The differential check: the same register log driven
     // into this core and into ctr's qsound-hle, diffed sample by sample. The
     // reference is fetched into gitignored testdata/, so it is wired up only
     // when it is actually there and a fresh checkout stays green without it.
@@ -251,7 +250,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&boards_tool.step);
 
     // --- the program ---------------------------------------------------------
-    // The window, and the only two modules allowed to reach raylib (§3.2).
+    // The window, and the only two modules allowed to reach raylib.
     // Everything above is wired without it and tested without a display.
     const raylib = raylib_dep orelse return;
 

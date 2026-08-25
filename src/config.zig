@@ -1,6 +1,6 @@
-//! Options persistence: a plain `key = value` text file (DESIGN.md §8), read at
+//! Options persistence: a plain `key = value` text file, read at
 //! startup and rewritten whenever the menu changes something. The board file
-//! (§8.1) is written in this same format, and for the opposite reason: settings
+//! is written in this same format, and for the opposite reason: settings
 //! can fall back to a default, a board cannot.
 //!
 //! Unknown keys are ignored and out-of-range values are clamped, so a
@@ -17,7 +17,7 @@ pub const max_scale = 4;
 pub const max_volume = 100;
 
 /// How the cabinet's control panel is wired. Not something the battery holds
-/// (§8.1) and not something a ROM says: it is what is bolted to the panel, so
+/// and not something a ROM says: it is what is bolted to the panel, so
 /// it is an option like the window scale is.
 pub const Buttons = enum { three, six };
 

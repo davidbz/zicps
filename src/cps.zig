@@ -14,7 +14,7 @@ const audio = @import("audio");
 const soundboard = @import("soundboard");
 
 /// This file, so that `Cps` can hand the 68000 core the bus entry points it
-/// calls by method while the functions themselves stay free (DESIGN.md §3.2).
+/// calls by method while the functions themselves stay free.
 const file = @This();
 
 /// What a read of nothing at all returns: the bus floats high.
@@ -26,7 +26,7 @@ const high_lane = 0xff00;
 const low_lane = 0x00ff;
 const both_lanes = high_lane | low_lane;
 
-// The 68000's map (DESIGN.md §7.1), as first and last address of each window.
+// The 68000's map, as first and last address of each window.
 pub const program_lo = 0x000000;
 pub const program_hi = 0x1fffff;
 pub const in1_lo = 0x800000;
@@ -91,7 +91,7 @@ pub const Button = enum(u4) {
 pub const button_count = @typeInfo(Button).@"enum".fields.len;
 
 /// The panel inputs a board with no DIP switches cannot do without: without
-/// service and test there is no way into the settings menu (DESIGN.md §5.1).
+/// service and test there is no way into the settings menu.
 pub const Panel = enum(u3) {
     coin1,
     coin2,
@@ -129,7 +129,7 @@ pub const Inputs = struct {
 
 /// A QSound board has no DIP switches, so everything a DIP switch would have
 /// said lives in a 93C46 serial EEPROM and is edited in the board's own service
-/// menu (DESIGN.md §8.4). Sixty-four words, one wire in and one out.
+/// menu. Sixty-four words, one wire in and one out.
 pub const eeprom_words = 64;
 pub const eeprom_bytes = eeprom_words * 2;
 /// An erased cell is all ones, which is what an unprogrammed chip holds and
@@ -284,8 +284,8 @@ pub const Eeprom = struct {
 pub const Cps = struct {
     /// The battery's contents. Read-only once loaded.
     board: board.Board,
-    /// The heap slices of DESIGN.md §3.2's one exception: reattached after a
-    /// save state is loaded rather than copied into it.
+    /// The heap slices, the one exception to the no-allocation rule: reattached
+    /// after a save state is loaded rather than copied into it.
     rom: romset.Set,
 
     v: video.Video = .{},
@@ -297,14 +297,14 @@ pub const Cps = struct {
     mixer: audio.Mixer = .{},
 
     inputs: Inputs = .{},
-    /// The settings a board with no DIP switches keeps instead (DESIGN.md §8.4).
+    /// The settings a board with no DIP switches keeps instead.
     eeprom: Eeprom = .{},
     /// Coin counters and lockouts, latched. Nothing reads them back; they exist
     /// because a game writes them and the write must land somewhere.
     coin_control: u16 = 0,
     coin_control2: u16 = 0,
 
-    /// The reference clock of DESIGN.md §3.3, never reset, and where in the
+    /// The reference clock, never reset, and where in the
     /// picture we are.
     ref: u64 = 0,
     frame: u64 = 0,
@@ -543,7 +543,7 @@ fn eepromSelect(c: *Cps, on: bool) void {
 /// A command is a start bit, two opcode bits and six address bits.
 fn eepromCommand(c: *Cps, op: EepromOp, addr: u6) void {
     eepromSelect(c, true);
-    eepromSend(c, 1 << 8 | @as(u32, @intFromEnum(op)) << 6 | addr, 9);
+    eepromSend(c, 1 << (eeprom_command_bits - 1) | @as(u32, @intFromEnum(op)) << 6 | addr, eeprom_command_bits);
 }
 
 fn eepromRead(c: *Cps, addr: u6) !u16 {
@@ -551,7 +551,7 @@ fn eepromRead(c: *Cps, addr: u6) !u16 {
     // The chip answers with a dummy zero and then the word, MSB first.
     try testing.expectEqual(@as(u16, 0), read16(c, eeprom_lo) & 1);
     var word: u16 = 0;
-    for (0..16) |_| {
+    for (0..eeprom_data_bits) |_| {
         eepromBit(c, 0);
         word = word << 1 | @as(u16, @truncate(read16(c, eeprom_lo) & 1));
     }
@@ -564,7 +564,7 @@ test "the EEPROM answers the 93C46 protocol a service menu speaks" {
     // An erased chip, and a write refused until one is enabled.
     try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 3));
     eepromCommand(&c, .write, 3);
-    eepromSend(&c, 0x1234, 16);
+    eepromSend(&c, 0x1234, eeprom_data_bits);
     eepromSelect(&c, false);
     try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 3));
     try testing.expect(!c.eeprom.dirty);
@@ -572,7 +572,7 @@ test "the EEPROM answers the 93C46 protocol a service menu speaks" {
     eepromCommand(&c, .special, @as(u6, @intFromEnum(EepromSpecial.enable)) << 4);
     eepromSelect(&c, false);
     eepromCommand(&c, .write, 3);
-    eepromSend(&c, 0x1234, 16);
+    eepromSend(&c, 0x1234, eeprom_data_bits);
     eepromSelect(&c, false);
     try testing.expectEqual(@as(u16, 0x1234), try eepromRead(&c, 3));
     try testing.expect(c.eeprom.dirty);
@@ -588,7 +588,7 @@ test "the EEPROM answers the 93C46 protocol a service menu speaks" {
     eepromCommand(&c, .special, @as(u6, @intFromEnum(EepromSpecial.disable)) << 4);
     eepromSelect(&c, false);
     eepromCommand(&c, .write, 7);
-    eepromSend(&c, 0xbeef, 16);
+    eepromSend(&c, 0xbeef, eeprom_data_bits);
     eepromSelect(&c, false);
     try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 7));
 

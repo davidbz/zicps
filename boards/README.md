@@ -4,7 +4,7 @@ One file per CPS-1/1.5 set, named the way MAME names the set, embedded in the
 binary at build time (`list.zig`, `src/boards.zig`). A board file is what a
 working board keeps in the RAM its battery holds up — the CPS-B register
 mapping, the graphics bank table and the Kabuki key — plus where every chip in
-the zip lands. See DESIGN.md §8.1 and §8.2 for the format.
+the zip lands. See DESIGN.md for the format.
 
 `roms/dino.zip` finds `dino` here, but only last: `--board <path>` wins, then a
 `<set>.board` beside the set, then this library. Your own file always beats
@@ -30,7 +30,7 @@ only the numbers that say how to read yours.
 ## What these files do not carry
 
 - **No sound outside QSound.** Only the CPS-1.5 sets have `audio` and `qsound`
-  lines; a plain CPS-1 board's YM2151 and OKI are out of scope (DESIGN.md §5.1),
+  lines; a plain CPS-1 board's YM2151 and OKI are out of scope,
   so those sets run silent.
 - **No DIP switches.** Those sets run on their default settings.
 - **No promise beyond the table.** Seven of these boot on real sets here; every

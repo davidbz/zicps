@@ -1,4 +1,4 @@
-//! The board file: what the battery on a CPS-1.5 board holds (DESIGN.md §8.1).
+//! The board file: what the battery on a CPS-1.5 board holds.
 //!
 //! The CPS-B-21's register mapping, its graphics bank table and the Kabuki key
 //! are not in the ROMs — they are in RAM held up by a battery, which is why a
@@ -34,13 +34,26 @@ pub const layer_count = @typeInfo(Layer).@"enum".fields.len;
 pub const Enable = enum(u3) { scroll1, scroll2, scroll3, stars1, stars2 };
 pub const enable_count = @typeInfo(Enable).@"enum".fields.len;
 
+/// Every member of an enum, comma-separated, for the error messages that offer
+/// the reader the whole list. Built from the enum, so a member added later
+/// cannot go unnamed.
+fn nameList(comptime E: type) []const u8 {
+    comptime {
+        var out: []const u8 = "";
+        for (@typeInfo(E).@"enum".fields, 0..) |field, i| {
+            out = out ++ (if (i == 0) "" else ", ") ++ field.name;
+        }
+        return out;
+    }
+}
+
 /// Which chips a tile code range lives on, and the same four bank sizes the
 /// B-board's PAL switches between.
 pub const gfx_banks = 4;
 pub const max_gfx_ranges = 16;
 pub const max_roms = 64;
 
-/// The four halves of a Kabuki key (DESIGN.md §7.2). Two nibble permutations,
+/// The four halves of a Kabuki key. Two nibble permutations,
 /// an address key and a XOR; `kabuki.zig` turns them into the two views of the
 /// sound ROM.
 pub const Kabuki = struct {
@@ -207,88 +220,109 @@ const Key = enum {
     kabuki,
 };
 
-/// Parses a board file. Every failure carries a line number and the key that
-/// was wrong, or the list of keys that never appeared.
-pub fn parse(text: []const u8, diag: *Diag) Error!Board {
-    var b = Board{};
-    var seen_version = false;
+/// The board being built and where in the file it is being built from. It is
+/// what a line of the file is applied to, and what the two "did the file say
+/// this at all" flags hang off.
+const Parser = struct {
+    b: Board = .{},
+    diag: *Diag,
+    line_no: u32 = 0,
+    seen_version: bool = false,
     // A board whose PAL decodes no priority mask at all writes the line out as
     // four `none`s, and a board file that forgot the line has not. The values
     // cannot tell those apart, so the line is remembered rather than read back.
-    var seen_priority = false;
+    seen_priority: bool = false,
+};
 
-    var line_no: u32 = 0;
+/// Parses a board file. Every failure carries a line number and the key that
+/// was wrong, or the list of keys that never appeared.
+pub fn parse(text: []const u8, diag: *Diag) Error!Board {
+    var p = Parser{ .diag = diag };
+
     var lines = std.mem.splitAny(u8, text, "\r\n");
     while (lines.next()) |raw| {
-        line_no += 1;
+        p.line_no += 1;
         const line = trim(stripComment(raw));
         if (line.len == 0) continue;
-
-        const eq = std.mem.indexOfScalar(u8, line, '=') orelse
-            return diag.say("line {d}: expected `key = value`, got `{s}`", .{ line_no, line });
-        const key = trim(line[0..eq]);
-        var vals = std.mem.tokenizeAny(u8, line[eq + 1 ..], " \t,");
-
-        const what = std.meta.stringToEnum(Key, key);
-        if (!seen_version and what != .version)
-            return diag.say("line {d}: expected `version = {d}` first; this does not look like a board file", .{ line_no, version });
-
-        if (what) |k| {
-            switch (k) {
-                .version => {
-                    const v = try int(u32, &vals, key, line_no, diag);
-                    if (v != version) return diag.say("line {d}: board file version {d}, this build reads {d}", .{ line_no, v, version });
-                    seen_version = true;
-                },
-                .layer_control => b.layer_control = try reg(&vals, key, line_no, diag),
-                .priority => {
-                    for (&b.priority) |*p| p.* = try reg(&vals, key, line_no, diag);
-                    seen_priority = true;
-                },
-                .palette_control => b.palette_control = try reg(&vals, key, line_no, diag),
-                .id => {
-                    b.id_offset = try reg(&vals, key, line_no, diag);
-                    b.id_value = try int(u16, &vals, key, line_no, diag);
-                },
-                .multiply => {
-                    b.mult_factor1 = try reg(&vals, key, line_no, diag);
-                    b.mult_factor2 = try reg(&vals, key, line_no, diag);
-                    b.mult_result_lo = try reg(&vals, key, line_no, diag);
-                    b.mult_result_hi = try reg(&vals, key, line_no, diag);
-                },
-                .in2 => b.in2_offset = try reg(&vals, key, line_no, diag),
-                .in3 => b.in3_offset = try reg(&vals, key, line_no, diag),
-                .out2 => b.out2_offset = try reg(&vals, key, line_no, diag),
-                .layer_enable => for (&b.layer_enable) |*m| {
-                    m.* = try int(u16, &vals, key, line_no, diag);
-                },
-                .raster_line => for (&b.raster_line) |*r| {
-                    r.* = try reg(&vals, key, line_no, diag);
-                },
-                .bank_sizes => for (&b.bank_sizes) |*s| {
-                    s.* = try int(u32, &vals, key, line_no, diag);
-                },
-                .gfx_bank => try addRange(&b, &vals, line_no, diag),
-                .kabuki => b.kabuki = .{
-                    .swap1 = try int(u32, &vals, key, line_no, diag),
-                    .swap2 = try int(u32, &vals, key, line_no, diag),
-                    .addr = try int(u16, &vals, key, line_no, diag),
-                    .xor = try int(u8, &vals, key, line_no, diag),
-                },
-            }
-        } else if (std.meta.stringToEnum(Region, key)) |region| {
-            try addRom(&b, region, &vals, line_no, diag);
-        } else {
-            return diag.say("line {d}: unknown key `{s}`", .{ line_no, key });
-        }
-
-        if (vals.next()) |extra|
-            return diag.say("line {d}: `{s}` has more values than it takes, starting at `{s}`", .{ line_no, key, extra });
+        try parseLine(&p, line);
     }
 
-    if (!seen_version) return diag.say("no `version` line: this does not look like a board file", .{});
-    try require(&b, seen_priority, diag);
-    return b;
+    if (!p.seen_version) return diag.say("no `version` line: this does not look like a board file", .{});
+    try require(&p.b, p.seen_priority, diag);
+    return p.b;
+}
+
+/// One `key = value` line, whichever of the three kinds of key it names.
+fn parseLine(p: *Parser, line: []const u8) Error!void {
+    const diag = p.diag;
+    const eq = std.mem.indexOfScalar(u8, line, '=') orelse
+        return diag.say("line {d}: expected `key = value`, got `{s}`", .{ p.line_no, line });
+    const key = trim(line[0..eq]);
+    var vals = std.mem.tokenizeAny(u8, line[eq + 1 ..], " \t,");
+
+    const what = std.meta.stringToEnum(Key, key);
+    if (!p.seen_version and what != .version)
+        return diag.say("line {d}: expected `version = {d}` first; this does not look like a board file", .{ p.line_no, version });
+
+    if (what) |k| {
+        try applyKey(p, k, key, &vals);
+    } else if (std.meta.stringToEnum(Region, key)) |region| {
+        try addRom(&p.b, region, &vals, p.line_no, diag);
+    } else {
+        return diag.say("line {d}: unknown key `{s}`", .{ p.line_no, key });
+    }
+
+    if (vals.next()) |extra|
+        return diag.say("line {d}: `{s}` has more values than it takes, starting at `{s}`", .{ p.line_no, key, extra });
+}
+
+/// What each key means, and how many values it takes.
+fn applyKey(p: *Parser, k: Key, key: []const u8, vals: *Tokens) Error!void {
+    const b = &p.b;
+    const line_no = p.line_no;
+    const diag = p.diag;
+    switch (k) {
+        .version => {
+            const v = try int(u32, vals, key, line_no, diag);
+            if (v != version) return diag.say("line {d}: board file version {d}, this build reads {d}", .{ line_no, v, version });
+            p.seen_version = true;
+        },
+        .layer_control => b.layer_control = try reg(vals, key, line_no, diag),
+        .priority => {
+            for (&b.priority) |*x| x.* = try reg(vals, key, line_no, diag);
+            p.seen_priority = true;
+        },
+        .palette_control => b.palette_control = try reg(vals, key, line_no, diag),
+        .id => {
+            b.id_offset = try reg(vals, key, line_no, diag);
+            b.id_value = try int(u16, vals, key, line_no, diag);
+        },
+        .multiply => {
+            b.mult_factor1 = try reg(vals, key, line_no, diag);
+            b.mult_factor2 = try reg(vals, key, line_no, diag);
+            b.mult_result_lo = try reg(vals, key, line_no, diag);
+            b.mult_result_hi = try reg(vals, key, line_no, diag);
+        },
+        .in2 => b.in2_offset = try reg(vals, key, line_no, diag),
+        .in3 => b.in3_offset = try reg(vals, key, line_no, diag),
+        .out2 => b.out2_offset = try reg(vals, key, line_no, diag),
+        .layer_enable => for (&b.layer_enable) |*m| {
+            m.* = try int(u16, vals, key, line_no, diag);
+        },
+        .raster_line => for (&b.raster_line) |*r| {
+            r.* = try reg(vals, key, line_no, diag);
+        },
+        .bank_sizes => for (&b.bank_sizes) |*s| {
+            s.* = try int(u32, vals, key, line_no, diag);
+        },
+        .gfx_bank => try addRange(b, vals, line_no, diag),
+        .kabuki => b.kabuki = .{
+            .swap1 = try int(u32, vals, key, line_no, diag),
+            .swap2 = try int(u32, vals, key, line_no, diag),
+            .addr = try int(u16, vals, key, line_no, diag),
+            .xor = try int(u8, vals, key, line_no, diag),
+        },
+    }
 }
 
 /// The keys without which the machine cannot be built at all. Named together
@@ -338,7 +372,7 @@ fn addRange(b: *Board, vals: *Tokens, line_no: u32, diag: *Diag) Error!void {
     var names = std.mem.tokenizeScalar(u8, types_text, '|');
     while (names.next()) |name| {
         const layer = std.meta.stringToEnum(Layer, name) orelse
-            return diag.say("line {d}: `{s}` is not a layer (sprites, scroll1, scroll2, scroll3, stars)", .{ line_no, name });
+            return diag.say("line {d}: `{s}` is not a layer (" ++ nameList(Layer) ++ ")", .{ line_no, name });
         types |= @as(u8, 1) << @intFromEnum(layer);
     }
 
@@ -365,7 +399,7 @@ fn addRom(b: *Board, region: Region, vals: *Tokens, line_no: u32, diag: *Diag) E
     const mode_text = vals.next() orelse
         return diag.say("line {d}: `{s}` needs <dest> <length> <mode> <file> [<offset in file>]", .{ line_no, key });
     const mode = std.meta.stringToEnum(Mode, mode_text) orelse
-        return diag.say("line {d}: `{s}` is not a load mode (byte, word, word64, byte64)", .{ line_no, mode_text });
+        return diag.say("line {d}: `{s}` is not a load mode (" ++ nameList(Mode) ++ ")", .{ line_no, mode_text });
     const name = vals.next() orelse
         return diag.say("line {d}: `{s}` names no file", .{ line_no, key });
 
@@ -570,6 +604,24 @@ test "a board file that is wrong says what is wrong with it" {
     try expectRefused(example ++ "\nprogram = 0x0 0x100 word x.bin 0x10 0x20\n", "more values than it takes");
 }
 
+// An error that offers the reader a list has to offer the whole list: a mode
+// or a layer added later and left out of the message reads as one the board
+// file may not ask for.
+test "an error that lists what is allowed lists all of it" {
+    try expectNames(Mode, example ++ "\nprogram = 0x0 0x1000 nibble x.bin\n");
+    try expectNames(Layer, example ++ "\ngfx_bank = scroll9 0 1 0\n");
+}
+
+fn expectNames(comptime E: type, text: []const u8) !void {
+    var diag = Diag{};
+    try testing.expectError(error.BadBoardFile, parse(text, &diag));
+    inline for (@typeInfo(E).@"enum".fields) |field| {
+        if (std.mem.indexOf(u8, diag.message(), field.name) == null) {
+            std.debug.print("`{s}` is allowed but `{s}` does not say so\n", .{ field.name, diag.message() });
+            return error.NameNotListed;
+        }
+    }
+}
 test "a board file missing what the machine needs names all of it at once" {
     var diag = Diag{};
     try testing.expectError(error.BadBoardFile, parse("version = 1\n", &diag));

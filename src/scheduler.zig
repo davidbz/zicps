@@ -1,4 +1,4 @@
-//! The frame loop (DESIGN.md §3.3).
+//! The frame loop.
 //!
 //! A CPS-1.5 board has three independent oscillators and no master clock, so
 //! time here is a 120 MHz reference tick: the smallest rate that divides all
@@ -39,7 +39,7 @@ pub const ref_per_frame = ref_per_line * video.lines_per_frame;
 
 /// 7680 reference ticks a line divide by 10 and by 15 exactly, so neither CPU
 /// carries a remainder from line to line and neither needs a debt counter of
-/// its own. QSound's 4992 does not divide evenly, and brings §3.3's debt
+/// its own. QSound's 4992 does not divide evenly, and brings the debt
 /// machinery with it.
 pub const cpu_per_line = ref_per_line / ref_per_cpu;
 pub const sound_per_line = ref_per_line / ref_per_sound;
@@ -143,7 +143,7 @@ fn runSound(c: *cps.Cps) void {
     const s = &c.sound;
 
     // A set with no sound ROM has no sound board — the in-repo test ROM is one
-    // (DESIGN.md §8.1) — and a Z80 fetching 0xff out of empty space would spend
+    // — and a Z80 fetching 0xff out of empty space would spend
     // the run taking RST 38 and pushing return addresses into RAM.
     if (s.rom.len == 0) return;
 
@@ -183,7 +183,7 @@ pub fn reset(c: *cps.Cps, cpu: *m68k.Cpu) void {
 }
 
 /// Everything a frame can have changed, in one number: what `--frames N` prints
-/// and what a replay is compared on (DESIGN.md §6.1). More than the picture, so
+/// and what a replay is compared on. More than the picture, so
 /// that a divergence which has not reached the screen yet is still caught.
 pub fn hash(c: *const cps.Cps, cpu: *const m68k.Cpu) u64 {
     var h = std.hash.Wyhash.init(0);

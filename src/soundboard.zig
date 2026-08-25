@@ -1,5 +1,5 @@
 //! The sound board: the Z80's bus, its banking, and the two boards' one shared
-//! window (DESIGN.md §7.2).
+//! window.
 //!
 //! This is a board of its own. It has its own crystal, its own ROM and the two
 //! kilobytes of RAM the 68000 can see into; the 68000 does not drive the sound
@@ -60,7 +60,7 @@ pub const SoundBoard = struct {
     /// 64 KiB of machine state and buys a bus read that is one index.
     op: [fixed_bytes]u8 = @splat(blank),
     data: [fixed_bytes]u8 = @splat(blank),
-    /// The whole audio region, for the bank window. One of DESIGN.md §3.2's
+    /// The whole audio region, for the bank window. One of the
     /// heap slices: reattached after a save state rather than copied into it.
     rom: []const u8 = &.{},
 
@@ -73,7 +73,7 @@ pub const SoundBoard = struct {
 
     /// ponytail: which of the two ROM views a read gets is decided by the
     /// address matching where the next instruction byte is due, because the
-    /// pinned z80 has no `z80Fetch` hook (DESIGN.md §2). The custom watches the
+    /// pinned z80 has no `z80Fetch` hook. The custom watches the
     /// M1 pin, and M1 is low only for an opcode byte and the prefixes ahead of
     /// it: an instruction's immediate bytes are ordinary reads and decrypt the
     /// other way. So the cursor carries `m1` alongside it. It is wrong only for

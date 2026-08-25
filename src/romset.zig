@@ -1,4 +1,4 @@
-//! The ROM set: the chips on the two boards, as files (DESIGN.md §8.2).
+//! The ROM set: the chips on the two boards, as files.
 //!
 //! A set is a directory of chip images or a zip of the same. The board file
 //! says which file goes where, because one chip is rarely a contiguous slice of
@@ -54,26 +54,43 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
     var src = try open(gpa, io, parent, path, diag);
     defer src.close();
 
-    var sizes: [board.region_count]u64 = @splat(0);
+    var sizes = std.EnumArray(board.Region, u64).initFill(0);
     for (b.romList()) |rom| {
-        const end = rom.mode.extent(rom.dest, rom.len);
-        const i = @intFromEnum(rom.region);
-        sizes[i] = @max(sizes[i], end);
+        const at = sizes.getPtr(rom.region);
+        at.* = @max(at.*, rom.mode.extent(rom.dest, rom.len));
     }
-    try cap(&sizes, diag);
+    try cap(&sizes.values, diag);
 
     // Graphics arrive interleaved and are expanded afterwards; the other three
     // regions are their final selves.
-    const program = try alloc(gpa, sizes[@intFromEnum(board.Region.program)]);
+    const program = try alloc(gpa, sizes.get(.program));
     errdefer gpa.free(program);
-    const audio = try alloc(gpa, sizes[@intFromEnum(board.Region.audio)]);
+    const audio = try alloc(gpa, sizes.get(.audio));
     errdefer gpa.free(audio);
-    const qsound = try alloc(gpa, sizes[@intFromEnum(board.Region.qsound)]);
+    const qsound = try alloc(gpa, sizes.get(.qsound));
     errdefer gpa.free(qsound);
 
-    const packed_gfx = try alloc(gpa, sizes[@intFromEnum(board.Region.gfx)]);
+    const packed_gfx = try alloc(gpa, sizes.get(.gfx));
     defer gpa.free(packed_gfx);
 
+    try fill(gpa, &src, b, std.EnumArray(board.Region, []u8).init(.{
+        .program = program,
+        .gfx = packed_gfx,
+        .audio = audio,
+        .qsound = qsound,
+    }), diag);
+
+    const gfx = try alloc(gpa, packed_gfx.len * pixels_per_byte);
+    errdefer gpa.free(gfx);
+    decode(packed_gfx, gfx);
+
+    return .{ .program = program, .gfx = gfx, .audio = audio, .qsound = qsound };
+}
+
+/// Reads every chip the board file names into the region it belongs to. A file
+/// too short for what the board file reads out of it, or one whose CRC says it
+/// is not the chip the file was written for, stops the load here.
+fn fill(gpa: std.mem.Allocator, src: *Source, b: *const board.Board, regions: std.EnumArray(board.Region, []u8), diag: *Diag) Error!void {
     for (b.romList()) |rom| {
         const bytes = try src.read(rom);
         defer gpa.free(bytes);
@@ -83,20 +100,8 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
             return fail(diag, "{s} is 0x{x} bytes, but the board file reads 0x{x} from it", .{ rom.name, bytes.len, want });
         try verify(rom, bytes, diag);
 
-        const region = switch (rom.region) {
-            .program => program,
-            .gfx => packed_gfx,
-            .audio => audio,
-            .qsound => qsound,
-        };
-        place(region, rom, bytes[rom.src..][0..rom.len]);
+        place(regions.get(rom.region), rom, bytes[rom.src..][0..rom.len]);
     }
-
-    const gfx = try alloc(gpa, packed_gfx.len * pixels_per_byte);
-    errdefer gpa.free(gfx);
-    decode(packed_gfx, gfx);
-
-    return .{ .program = program, .gfx = gfx, .audio = audio, .qsound = qsound };
 }
 
 /// A board file that names the dump it was written against is checked against

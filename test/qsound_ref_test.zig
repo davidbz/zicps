@@ -1,10 +1,10 @@
-//! The differential check for the QSound core (DESIGN.md §9 M4).
+//! The differential check for the QSound core.
 //!
 //! Verification here is by diff, not by ear, exactly as zigesis validated its
 //! FM core against Nuked-OPN2: the same register log is driven into this core
 //! and into ctr's `qsound-hle`, one sample at a time, and the two outputs are
 //! compared sample by sample. A deviation is either a bug or a deliberate
-//! divergence with a reason — DESIGN.md §9 M4 carries the table this prints.
+//! divergence with a reason, and this prints the table of them.
 //!
 //! The reference is fetched by `tools/fetch_qsound_reference.sh` into
 //! gitignored `testdata/`. `build.zig` wires this file in only when it is
@@ -226,8 +226,8 @@ test "the QSound core matches qsound-hle sample for sample" {
     }
     if (worst <= allowed) return;
 
-    // Only a deviation is worth saying out loud; the exact run is the one
-    // DESIGN.md §9 M4 publishes, and it says nothing every time it holds.
+    // Only a deviation is worth saying out loud: this says nothing every time
+    // the tolerance holds.
     std.debug.print("\n  {s:<18}{s:>9}{s:>11}{s:>8}\n", .{ "case", "samples", "differing", "worst" });
     for (cases, results) |case, d| {
         std.debug.print("  {s:<18}{d:>9}{d:>11}{d:>8}\n", .{ case.name, d.samples, d.differing, d.worst });

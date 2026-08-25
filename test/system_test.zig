@@ -1,5 +1,5 @@
-//! M0's acceptance, as a test: a set and its board file load, the 68000 runs
-//! from its reset vector, and two runs of the same input log are identical.
+//! The first acceptance, as a test: a set and its board file load, the 68000
+//! runs from its reset vector, and two runs of the same input log are the same.
 //!
 //! The set here is built in a temporary directory out of a program the test
 //! assembles by hand, so this proves the whole path — board file, ROM set,
@@ -166,9 +166,9 @@ test "two runs of the same input log are bit-identical" {
     try testing.expect(try run(testing.allocator, rom, b, &other, frames) != first);
 }
 
-// ------------------------------------------------ M2: the acceptance test ROM
+// --------------------------------------------------- the acceptance test ROM
 
-/// The acceptance ROM (DESIGN.md §10). It fills graphics RAM with a palette,
+/// The acceptance ROM. It fills graphics RAM with a palette,
 /// three name tables, an object list and a row-scroll table, points the CPS
 /// registers at them and spins while the video chip draws.
 ///
@@ -296,7 +296,7 @@ fn layerOrder(slots: [4]board.Layer) u16 {
 }
 
 const draw_board_file = std.fmt.comptimePrint(
-    \\# the board the M2 acceptance ROM runs on: tiles in one bank, stars in another
+    \\# the board the acceptance ROM runs on: tiles in one bank, stars in another
     \\version = 1
     \\layer_control   = 0x{x:0>2}
     \\priority        = 0x{x:0>2} 0x{x:0>2} 0x{x:0>2} 0x{x:0>2}
@@ -725,9 +725,9 @@ test "the test ROM draws its three tilemaps" {
 /// The scoreboard fails on a move in either direction — a layer that stopped
 /// drawing and a layer that started covering the others are the same bug.
 ///
-/// The hashes moved at M3 and again at M4, and the scores did not, which is
-/// the whole story of those milestones from the picture's side: `scheduler.hash`
-/// took the sound board in and then the chip's own state, and nothing draws
+/// The hashes moved when the sound board landed and again when the chip did,
+/// and the scores did not, which is the whole story from the picture's side:
+/// `scheduler.hash` took each of them in, and nothing draws
 /// differently for it. They moved a third time when the CPS-B register file was
 /// cut back to the 0x40 bytes the 68000 actually decodes — 128 bytes the hash
 /// had been reading and no bus cycle could ever write — and the scores held
@@ -794,9 +794,9 @@ test "scoreboard: every page of the test ROM draws what it drew" {
     try testing.expect(table[@intFromEnum(Page.priority)].scores[0] < table[@intFromEnum(Page.sprites)].scores[0]);
 }
 
-// ------------------------------------------------- M3: the sound board
+// ------------------------------------------------------------ the sound board
 
-// Everything below is the M3 acceptance (DESIGN.md §9): a sound driver, in a
+// Everything below is the sound acceptance: a sound driver, in a
 // ROM this test encrypts itself, running on the Z80 behind the Kabuki custom;
 // the 68000 handing it commands through shared RAM; QSound register writes in
 // the order a driver makes them; and the audio pipeline turning the chip's
@@ -1031,7 +1031,7 @@ fn encryptedDriver(key: board.Kabuki) [z80_bytes]u8 {
 const sound_key = board.Kabuki{ .swap1 = 0x76543210, .swap2 = 0x24601357, .addr = 0x4343, .xor = 0x43 };
 
 const sound_board_file = std.fmt.comptimePrint(
-    \\# a board with a sound board on it, for the M3 acceptance
+    \\# a board with a sound board on it, for the sound acceptance
     \\version = 1
     \\layer_control   = 0x12
     \\priority        = 0x14 0x16 0x08 0x0a
@@ -1175,9 +1175,9 @@ test "the sound board runs at its own speed, and the pipeline runs at the machin
     try testing.expect(frames > want_frames - 8 and frames < want_frames + 8);
 }
 
-// -------------------------------------------------- M4: the chip on that board
+// ------------------------------------------------------- the chip on that board
 
-// M4's acceptance (DESIGN.md §9): the channel the M3 driver sets up actually
+// The chip's acceptance: the channel that driver sets up actually
 // plays, out of a sample ROM, through the pan and echo path, and the mute a
 // debugger reaches for takes a voice out of the mix without taking it out of
 // the ROM. How far the chip is from the hardware is not measured here — that
