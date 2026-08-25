@@ -98,7 +98,7 @@ zicps is built on [z68k](https://github.com/davidbz/z68k) and
 [z80](https://github.com/davidbz/z80), conformance-tested 68000 and Z80 cores,
 and reuses the frontend and engineering standards of
 [zigesis](https://github.com/davidbz/zigesis). It leans on some excellent
-community research, all credited in [`DESIGN.md`](DESIGN.md) §11.
+community research, all credited in [`DESIGN.md`](DESIGN.md).
 
 ## License
 

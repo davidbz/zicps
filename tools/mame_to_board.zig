@@ -1,5 +1,5 @@
 //! MAME's CPS-1 tables, turned into the board files under `boards/`
-//! (DESIGN.md §8.1).
+//!.
 //!
 //! The battery on a B-board holds numbers that are on no chip and in no dump,
 //! so everyone who emulates this hardware is reading the same transcription:
@@ -490,7 +490,7 @@ const Mame = struct {
             \\# Board file for MAME's `{s}`, written by tools/mame_to_board.zig.
             \\#
             \\# The register mapping, the bank table and the Kabuki key are what a
-            \\# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+            \\# working board keeps in the RAM its battery holds up,
             \\# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
             \\# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
             \\
@@ -573,8 +573,8 @@ const Mame = struct {
             });
         }
 
-        // A CPS-1 sound board is a YM2151 and an OKI, which DESIGN.md §5.1
-        // puts out of scope: without a QSound chip beside it, the Z80 has
+        // A CPS-1 sound board is a YM2151 and an OKI, which this build
+        // does not emulate: without a QSound chip beside it, the Z80 has
         // nothing this build can play, and a set with no sound ROM at all is
         // a path the loader already has.
         var quiet = true;
@@ -714,10 +714,16 @@ fn registers(w: *std.Io.Writer, config: Config) !void {
         try w.writeByte('\n');
     }
 
+    try banks(w, config.mapper);
+}
+
+/// The graphics bank sizes and the code ranges that live on them, which is the
+/// half of the board file the tile decoder reads.
+fn banks(w: *std.Io.Writer, mapper: anytype) !void {
     try w.writeAll("\nbank_sizes =");
-    for (config.mapper.sizes) |size| try w.print(" 0x{x}", .{size});
+    for (mapper.sizes) |size| try w.print(" 0x{x}", .{size});
     try w.writeByte('\n');
-    for (config.mapper.ranges) |range| {
+    for (mapper.ranges) |range| {
         try w.writeAll("gfx_bank = ");
         var first = true;
         for (std.enums.values(board.Layer)) |layer| {

@@ -1,4 +1,4 @@
-//! The Kabuki custom: two views of the sound ROM (DESIGN.md §7.2).
+//! The Kabuki custom: two views of the sound ROM.
 //!
 //! The sound board's Z80 sits behind a custom whose decryption differs between
 //! an opcode fetch and a data read, with the key in the same battery-backed RAM
@@ -73,7 +73,7 @@ pub fn decodeByte(key: Kabuki, addr: u16, view: View, src: u8) u8 {
 /// The same chain backwards. A pair swap is its own inverse, so only the
 /// rotations and the order change. This is how a board is *written* rather
 /// than read, which is what lets this project encrypt a sound ROM of its own
-/// to test the decryption against (DESIGN.md §10).
+/// to test the decryption against.
 pub fn encodeByte(key: Kabuki, addr: u16, view: View, plain: u8) u8 {
     const sel = select(key, addr, view);
     const lo: u8 = @truncate(sel);

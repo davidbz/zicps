@@ -1,4 +1,4 @@
-//! QSound (DL-1425): the host side of the DSP, and the DSP (DESIGN.md §7.3).
+//! QSound (DL-1425): the host side of the DSP, and the DSP.
 //!
 //! The Z80 talks to the chip through three write ports and one read port — two
 //! bytes of data latched, then a register number that commits them — and the
@@ -11,9 +11,9 @@
 //! The model is high-level by design: the behaviour of the mask-programmed
 //! DSP16A program, not a core running it, because the 8 KiB of program cannot
 //! be redistributed and the audio path would skip on any machine without it.
-//! Its coefficient tables can be, and are (`qsound_rom.zig`). §7.3 rules the
-//! three ADPCM channels and the second filter mode out of scope: no known
-//! board uses either.
+//! Its coefficient tables can be, and are (`qsound_rom.zig`). The three ADPCM
+//! channels and the second filter mode are out of scope: no known board uses
+//! either.
 
 const std = @import("std");
 const audio = @import("audio");
@@ -217,7 +217,7 @@ pub const Qsound = struct {
     counter: u32 = 0,
     delay_update: bool = false,
 
-    /// The sample ROM. One of DESIGN.md §3.2's heap slices: reattached after a
+    /// The sample ROM. One of the heap slices: reattached after a
     /// save state rather than copied into it. The mask is the chip's own — the
     /// address bus is as wide as the ROM is, so a sample that runs off the end
     /// wraps rather than reaching nothing.
@@ -354,7 +354,7 @@ pub fn sample(q: *Qsound) audio.Frame {
 /// the fifth sample is the first one a listener hears.
 ///
 /// ponytail: mode 2 initialises differently and adds a second filter on the
-/// dry path. DESIGN.md §7.3 rules it out of scope — no known board uses it —
+/// dry path. It is out of scope — no known board uses it —
 /// so a driver that asks for it gets mode 1. The state register is decoded, so
 /// this shows up as `next_state` reading `init2`, not as silence.
 fn start(q: *Qsound) void {
@@ -430,29 +430,7 @@ fn mix(q: *Qsound) void {
     }
     const echoed = echoStep(&q.echo, echo_in);
 
-    for (0..channels) |ch| {
-        // The echo comes back on the unfiltered half of the left channel and
-        // the filtered half of the right one, which is most of what makes the
-        // effect wide.
-        var wet: i32 = if (ch == 1) @as(i32, echoed) << 16 else 0;
-        var dry: i32 = if (ch == 0) @as(i32, echoed) << 16 else 0;
-        for (heard, q.pan) |out, pan| {
-            const p = panIndex(pan);
-            dry -%= (@as(i32, out) * pan_table[ch][pan_dry][p]) << dsp_product_shift;
-            wet -%= (@as(i32, out) * pan_table[ch][pan_wet][p]) << dsp_product_shift;
-        }
-
-        wet = firStep(&q.filter[ch], @truncate(wet >> 16));
-        const mixed = (delayStep(&q.wet[ch], wet) +% delayStep(&q.dry[ch], dry)) << dsp_product_shift;
-        // Round to nearest and keep the top half. The program masks the low
-        // sixteen bits off first, which an arithmetic shift already does.
-        q.out[ch] = @truncate((mixed +% dsp_round) >> 16);
-
-        if (q.delay_update) {
-            delayReload(&q.wet[ch]);
-            delayReload(&q.dry[ch]);
-        }
-    }
+    for (0..channels) |ch| q.out[ch] = mixChannel(q, ch, heard, echoed);
     q.delay_update = false;
 
     q.counter += 1;
@@ -460,6 +438,32 @@ fn mix(q: *Qsound) void {
         q.counter = 0;
         q.state = q.next_state;
     }
+}
+
+/// One output channel: every voice through its pan pair, the echo return, the
+/// filter and the two delay lines.
+fn mixChannel(q: *Qsound, ch: usize, heard: [voices]i16, echoed: i16) i16 {
+    // The echo comes back on the unfiltered half of the left channel and the
+    // filtered half of the right one, which is most of what makes the effect
+    // wide.
+    var wet: i32 = if (ch == 1) @as(i32, echoed) << 16 else 0;
+    var dry: i32 = if (ch == 0) @as(i32, echoed) << 16 else 0;
+    for (heard, q.pan) |out, pan| {
+        const p = panIndex(pan);
+        dry -%= (@as(i32, out) * pan_table[ch][pan_dry][p]) << dsp_product_shift;
+        wet -%= (@as(i32, out) * pan_table[ch][pan_wet][p]) << dsp_product_shift;
+    }
+
+    wet = firStep(&q.filter[ch], @truncate(wet >> 16));
+    const mixed = (delayStep(&q.wet[ch], wet) +% delayStep(&q.dry[ch], dry)) << dsp_product_shift;
+
+    if (q.delay_update) {
+        delayReload(&q.wet[ch]);
+        delayReload(&q.dry[ch]);
+    }
+    // Round to nearest and keep the top half. The program masks the low
+    // sixteen bits off first, which an arithmetic shift already does.
+    return @truncate((mixed +% dsp_round) >> 16);
 }
 
 /// One voice: the sample under its position, at its volume, and the position

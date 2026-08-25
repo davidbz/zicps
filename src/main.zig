@@ -1,8 +1,7 @@
-//! The program: the window and the frame loop, with the headless runner of
-//! DESIGN.md §6.1 still under it. `--frames N` renders with no window, hashes
-//! the machine and exits; that is the backbone of testing rather than a debug
-//! feature, which is why it was the first thing that existed and has to keep
-//! working forever.
+//! The program: the window and the frame loop, with the headless runner still
+//! under it. `--frames N` renders with no window, hashes the machine and
+//! exits; that is the backbone of testing rather than a debug feature, which
+//! is why it was the first thing that existed and has to keep working forever.
 //!
 //! This and `ui/shell.zig` are the only files allowed to reach raylib, and the
 //! build graph is what enforces that rather than anyone remembering.
@@ -199,7 +198,7 @@ fn loadSet(
     };
 
     // What a set is called is what MAME calls it, which is what the boards
-    // that ship with this build are named after (DESIGN.md §8.1). The user's
+    // that ship with this build are named after. The user's
     // own file still wins: theirs is the board in front of them, and ours is
     // a transcription of a table.
     const name = std.fs.path.stem(std.fs.path.basename(board_file));
@@ -241,7 +240,7 @@ fn explainBoard() void {
         \\A CPS-1.5 board keeps its configuration in battery-backed RAM, so zicps needs
         \\a board file describing this board before it can run the set. One ships for every
         \\set MAME names, under boards/, and is found by the set's own name; a file beside
-        \\the set or --board wins over it. See DESIGN.md §8.1.
+        \\the set or --board wins over it.
         \\
     , .{});
 }
@@ -283,16 +282,7 @@ pub fn main(init: std.process.Init) !void {
 
     const cfg_path = try configPath(gpa, init.environ_map);
     defer gpa.free(cfg_path);
-    var cfg: Config = blk: {
-        const text = std.Io.Dir.cwd().readFileAlloc(io, cfg_path, gpa, .limited(max_config_bytes)) catch {
-            // Nothing there yet: write the defaults out, so there is a file to
-            // hand-edit without having to change something in the menu first.
-            saveConfig(io, cfg_path, .{}) catch |err| std.debug.print("cannot write {s}: {t}\n", .{ cfg_path, err });
-            break :blk .{};
-        };
-        defer gpa.free(text);
-        break :blk Config.parse(text);
-    };
+    var cfg = loadConfig(io, gpa, cfg_path);
 
     try windowed(io, gpa, c, &cpu, &cfg, &machine, .{
         .config = cfg_path,
@@ -301,6 +291,17 @@ pub fn main(init: std.process.Init) !void {
         .replay = o.replay,
         .record = o.record,
     });
+}
+
+/// The options file. Nothing there yet writes the defaults out, so there is a
+/// file to hand-edit without having to change something in the menu first.
+fn loadConfig(io: std.Io, gpa: std.mem.Allocator, path: []const u8) Config {
+    const text = std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(max_config_bytes)) catch {
+        saveConfig(io, path, .{}) catch |err| std.debug.print("cannot write {s}: {t}\n", .{ path, err });
+        return .{};
+    };
+    defer gpa.free(text);
+    return Config.parse(text);
 }
 
 /// Power-on, and also what the Reset menu entry does: every chip back to its
@@ -425,7 +426,7 @@ fn saveConfig(io: std.Io, path: []const u8, cfg: Config) !void {
     try cwd.writeFile(io, .{ .sub_path = path, .data = w.buffered() });
 }
 
-/// The EEPROM sidecar of DESIGN.md §8.4: `game.zip.nv` beside the set, with
+/// The EEPROM sidecar: `game.zip.nv` beside the set, with
 /// the extension *added* rather than replaced, so a directory set and a zip of
 /// the same name keep their own settings.
 fn nvPath(buf: []u8, set: []const u8) ![]const u8 {
@@ -467,11 +468,19 @@ fn keepPath(buf: []u8, path: []const u8) []const u8 {
 /// carry no checksum field to check it against — the head of the first one is
 /// the 68000's vector table and nothing else — so this is a reading, not a
 /// verdict: the same set gives the same number every time, and two people
-/// comparing dumps can say so in one line. See DESIGN.md §5.2.
+/// comparing dumps can say so in one line.
 fn programSum(program: []const u8) u16 {
     var sum: u16 = 0;
     for (program) |byte| sum +%= byte;
     return sum;
+}
+
+/// One region's row on the card. A CPS-1.5 always has all four, but a board
+/// file can describe a set that is missing one, and a row saying so is how
+/// that shows up rather than a crash.
+fn romRow(ui: *shell.Ui, name: []const u8, count: usize, bytes: usize) void {
+    if (bytes == 0) return shell.cardRow(ui, name, .bad, "NONE", .{});
+    shell.cardRow(ui, name, .plain, "{d} ROMs / {d} KiB", .{ count, bytes >> 10 });
 }
 
 /// The card the menu shows beside itself: what the set and the board file
@@ -480,23 +489,13 @@ fn programSum(program: []const u8) u16 {
 fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8) void {
     shell.cardStart(ui, std.fs.path.basename(set), m.from());
 
-    var regions: [4]usize = @splat(0);
-    for (m.b.romList()) |rom| regions[@intFromEnum(rom.region)] += 1;
+    var regions = std.EnumArray(board.Region, usize).initFill(0);
+    for (m.b.romList()) |rom| regions.getPtr(rom.region).* += 1;
 
-    shell.cardRow(ui, "PROGRAM", .plain, "{d} ROMs / {d} KiB", .{ regions[0], m.rom.program.len >> 10 });
-    shell.cardRow(ui, "GRAPHICS", .plain, "{d} ROMs / {d} KiB", .{ regions[1], m.rom.gfx.len >> 10 });
-    // A CPS-1.5 always has both, but a board file can describe a set that is
-    // missing one, and silence is how that shows up rather than a crash.
-    if (m.rom.audio.len == 0) {
-        shell.cardRow(ui, "SOUND", .bad, "NONE", .{});
-    } else {
-        shell.cardRow(ui, "SOUND", .plain, "{d} ROMs / {d} KiB", .{ regions[2], m.rom.audio.len >> 10 });
-    }
-    if (m.rom.qsound.len == 0) {
-        shell.cardRow(ui, "SAMPLES", .bad, "NONE", .{});
-    } else {
-        shell.cardRow(ui, "SAMPLES", .plain, "{d} ROMs / {d} KiB", .{ regions[3], m.rom.qsound.len >> 10 });
-    }
+    romRow(ui, "PROGRAM", regions.get(.program), m.rom.program.len);
+    romRow(ui, "GRAPHICS", regions.get(.gfx), m.rom.gfx.len);
+    romRow(ui, "SOUND", regions.get(.audio), m.rom.audio.len);
+    romRow(ui, "SAMPLES", regions.get(.qsound), m.rom.qsound.len);
     // The Kabuki key is the one thing in the board file that is a secret
     // rather than a setting: without it the Z80 runs garbage and the cabinet
     // is silent, so whether there is one is worth a line of its own.
@@ -578,6 +577,42 @@ const WindowedArgs = struct {
     record: ?[]const u8,
 };
 
+/// Everything the frame loop carries from one iteration to the next. The loop
+/// is a handful of named steps rather than one long body, and each step takes
+/// this instead of a dozen out-parameters.
+///
+/// `set` points into `path_buf`, so this lives where it is made and only ever
+/// travels by pointer.
+const Window = struct {
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    c: *cps.Cps,
+    cpu: *scheduler.Cpu,
+    cfg: *Config,
+    machine: *?Machine,
+    args: WindowedArgs,
+
+    replay: ?Replay,
+    log: ?std.ArrayList(u8),
+    has_audio: bool,
+    stream: rl.AudioStream,
+    tex: rl.Texture,
+    snow_tex: rl.Texture,
+
+    ui: shell.Ui = .{},
+    diag: board.Diag = .{},
+    flakes: snow.Snow = .{},
+    snow_px: [snow.width * snow.height]u32 = @splat(0xFF00_0000),
+    path_buf: [shell.max_path]u8 = undefined,
+    set: []const u8 = "",
+    frames: u32 = 0,
+    quit: bool = false,
+    nv_next: f64 = 0,
+    applied_scale: u8 = 0,
+    applied_fullscreen: bool = false,
+    target_fps: c_int = -1,
+};
+
 /// The window, the frame loop and the shell: idle snow with no set, the
 /// picture with one, and the menu over either.
 fn windowed(
@@ -593,8 +628,6 @@ fn windowed(
         .log = try std.Io.Dir.cwd().readFileAlloc(io, p, gpa, .limited(max_replay_bytes)),
     } else null;
     defer if (replay) |r| gpa.free(r.log);
-    var log: ?std.ArrayList(u8) = if (args.record == null) null else .empty;
-    defer if (log) |*r| r.deinit(gpa);
 
     rl.InitWindow(windowW(cfg.scale), windowH(cfg.scale), "zicps");
     if (!rl.IsWindowReady()) {
@@ -605,24 +638,12 @@ fn windowed(
     defer rl.CloseWindow();
     rl.SetExitKey(rl.KEY_NULL); // Escape is the menu key, not the quit key
 
-    const tex = rl.LoadTextureFromImage(fbImage(c));
-    var flakes = snow.Snow{};
-    var snow_px: [snow.width * snow.height]u32 = @splat(0xFF00_0000);
-    const snow_tex = rl.LoadTextureFromImage(.{
-        .data = &snow_px,
-        .width = snow.width,
-        .height = snow.height,
-        .mipmaps = 1,
-        .format = rl.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    });
-
     // The stream, not the vsync, paces the loop while a game runs: no
-    // SetTargetFPS, just `paceToAudio` below.
+    // SetTargetFPS, just `paceToAudio`. Without a device nothing ever drains
+    // the mixer, so the ring sits full and `paceToAudio` would sleep the loop
+    // down to a crawl. Fall back to timer pacing and keep the picture running.
     rl.InitAudioDevice();
     defer rl.CloseAudioDevice();
-    // Without a device nothing ever drains the mixer, so the ring sits full and
-    // `paceToAudio` would sleep the loop down to a crawl. Fall back to timer
-    // pacing and keep the picture running.
     const has_audio = rl.IsAudioDeviceReady();
     if (!has_audio) std.debug.print("no audio device; pacing on the frame timer instead\n", .{});
     rl.SetAudioStreamBufferSizeDefault(audio_chunk_frames);
@@ -630,154 +651,197 @@ fn windowed(
     defer rl.UnloadAudioStream(stream);
     rl.PlayAudioStream(stream);
 
+    var w = Window{
+        .io = io,
+        .gpa = gpa,
+        .c = c,
+        .cpu = cpu,
+        .cfg = cfg,
+        .machine = machine,
+        .args = args,
+        .replay = replay,
+        .log = if (args.record == null) null else .empty,
+        .has_audio = has_audio,
+        .stream = stream,
+        .tex = rl.LoadTextureFromImage(fbImage(c)),
+        .snow_tex = undefined,
+        .applied_scale = cfg.scale,
+    };
+    defer if (w.log) |*r| r.deinit(gpa);
+    w.snow_tex = rl.LoadTextureFromImage(.{
+        .data = &w.snow_px,
+        .width = snow.width,
+        .height = snow.height,
+        .mipmaps = 1,
+        .format = rl.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+    });
+
     // Where this set's own files go. `set.len == 0` is the idle window.
-    var path_buf: [shell.max_path]u8 = undefined;
-    var set: []const u8 = if (args.set.len == 0) "" else keepPath(&path_buf, args.set);
-    var ui = shell.Ui{};
+    if (args.set.len != 0) w.set = keepPath(&w.path_buf, args.set);
     if (machine.*) |*m| {
         startMachine(c, cpu, m);
-        loadNv(io, c, set);
-        describeBoard(&ui, m, set);
+        loadNv(io, c, w.set);
+        describeBoard(&w.ui, m, w.set);
     }
 
-    var diag = board.Diag{};
-    var nv_next: f64 = 0;
-    var applied_scale = cfg.scale;
-    var applied_fullscreen = false;
-    var target_fps: c_int = -1;
-    var frames: u32 = 0;
-    var quit = false;
-    while (!rl.WindowShouldClose() and !quit and !cpu.halted) {
-        switch (shell.update(&ui, cfg, machine.* != null)) {
-            .none => {},
-            .quit => quit = true,
-            // The EEPROM is a battery: it survives a reset, so it goes out to
-            // disk and comes back in around the machine being rebuilt. The
-            // board's own service menu is what writes it, and losing that on
-            // every reset would make the menu pointless.
-            .reset => if (machine.*) |*m| {
-                flushNv(io, c, set) catch |err| ui.status("cannot save settings: {t}", .{err});
-                startMachine(c, cpu, m);
-                loadNv(io, c, set);
-                frames = 0;
-            },
-            .load => |p| {
-                var next = loadSet(gpa, io, p, null, &diag) catch {
-                    ui.status("{s}: {s}", .{ std.fs.path.basename(p), diag.message() });
-                    continue;
-                };
-                flushNv(io, c, set) catch |err| ui.status("cannot save settings: {t}", .{err});
-                if (machine.*) |*old| old.deinit(gpa);
-                machine.* = next;
-                set = keepPath(&path_buf, p);
-                startMachine(c, cpu, &next);
-                loadNv(io, c, set);
-                describeBoard(&ui, &next, set);
-                ui.status("{s}: {d} KiB program, {d} KiB graphics", .{
-                    std.fs.path.basename(set),
-                    next.rom.program.len >> 10,
-                    next.rom.gfx.len >> 10,
-                });
-                frames = 0;
-            },
-            // Numbered by frame, so holding the key down never overwrites the
-            // shot before it and the order they were taken in is the order
-            // they sort in.
-            .screenshot => if (machine.* != null) {
-                var buf: [shell.max_path]u8 = undefined;
-                const shot_path = std.fmt.bufPrintZ(&buf, "{s}.{d}.png", .{ set, frames }) catch continue;
-                if (rl.ExportImage(fbImage(c), shot_path.ptr)) {
-                    ui.status("wrote {s}", .{shot_path});
-                } else ui.status("cannot write {s}", .{shot_path});
-            },
-        }
-        if (ui.dirty) {
-            saveConfig(io, args.config, cfg.*) catch |err| ui.status("cannot save options: {t}", .{err});
-            ui.dirty = false;
-        }
-        if (cfg.fullscreen != applied_fullscreen) {
-            rl.ToggleBorderlessWindowed();
-            applied_fullscreen = cfg.fullscreen;
-        }
-        if (!cfg.fullscreen and cfg.scale != applied_scale) {
-            rl.SetWindowSize(windowW(cfg.scale), windowH(cfg.scale));
-            applied_scale = cfg.scale;
-        }
-        // The mixer is where the volume knob lives, so muted is volume 0.
-        c.mixer.volume_pct = if (cfg.audio) cfg.volume else 0;
-        if (c.eeprom.dirty and rl.GetTime() >= nv_next) {
-            flushNv(io, c, set) catch |err| ui.status("cannot save settings: {t}", .{err});
-            nv_next = rl.GetTime() + nv_write_seconds;
-        }
-
-        const running = machine.* != null and !ui.open and (!ui.paused or ui.step);
-        if (running) {
-            // A paused machine owes exactly one frame; a fast-forwarded one
-            // runs several per drawn frame. Either way the recording still gets
-            // one word per emulated frame, so a replay of it is a replay.
-            const steps: u32 = if (ui.step) 1 else if (ui.fast) fast_forward_frames else 1;
-            for (0..steps) |_| {
-                c.inputs = if (replay) |r| r.at(frames) else readPanel(cfg.*);
-                if (log) |*r| try record(r, gpa, c.inputs);
-                scheduler.runFrame(c, cpu);
-                frames += 1;
-                // Drained inside the loop: the ring holds well under a
-                // fast-forwarded burst, so it has to go out as it is made.
-                if (has_audio) drainAudio(c, stream);
-            }
-            ui.step = false;
-        } else {
-            c.inputs = .{};
-        }
-        ui.pad = c.inputs.pad[0];
-        ui.panel = c.inputs.panel;
-        ui.six = cfg.buttons == .six;
-
-        // Idle and paused frames have no audio to pace against, so the timer
-        // takes over; a running game hands pacing back to the ring buffer.
-        // Fast-forward paces on the timer too: capping the *drawn* frames at
-        // the video rate is what makes it a fixed multiple of full speed rather
-        // than as fast as the box happens to be.
-        const want_fps: c_int = if (machine.* == null)
-            snow_fps
-        else if (!running)
-            idle_fps
-        else if (has_audio and !ui.fast)
-            0
-        else
-            video_fps;
-        if (want_fps != target_fps) {
-            rl.SetTargetFPS(want_fps);
-            target_fps = want_fps;
-        }
-
-        rl.BeginDrawing();
-        if (machine.* != null) {
-            rl.UpdateTexture(tex, &c.v.fb);
-            drawPicture(tex, video.width, video.height);
-            if (cfg.scanlines) shell.drawScanlines(video.height);
-        } else {
-            flakes.step(&snow_px);
-            rl.UpdateTexture(snow_tex, &snow_px);
-            drawPicture(snow_tex, snow.width, snow.height);
-            if (cfg.scanlines) shell.drawScanlines(snow.height);
-            shell.drawIdlePrompt();
-        }
-        shell.draw(&ui, cfg);
-        rl.EndDrawing();
-
+    while (!rl.WindowShouldClose() and !w.quit and !cpu.halted) {
+        try serveRequest(&w);
+        applyOptions(&w);
+        const running = try stepFrames(&w);
+        paceDrawing(&w, running);
+        drawFrame(&w);
         // Nothing is reading the mixer when idle, and fast-forward is the one
         // case where outrunning the device is the point.
-        if (!running or !has_audio or ui.fast) continue;
-        paceToAudio(c, io);
+        if (running and has_audio and !w.ui.fast) paceToAudio(c, io);
     }
 
-    flushNv(io, c, set) catch |err| std.debug.print("cannot save settings: {t}\n", .{err});
-    if (log) |*r| try writeLog(io, args.record.?, r.items);
-    if (frames != 0) {
+    flushNv(io, c, w.set) catch |err| std.debug.print("cannot save settings: {t}\n", .{err});
+    if (w.log) |*r| try writeLog(io, args.record.?, r.items);
+    if (w.frames != 0) {
         var sound = Sound{};
-        report(c, cpu, &sound, frames);
+        report(c, cpu, &sound, w.frames);
     }
+}
+
+/// Whatever the shell asked for this frame.
+fn serveRequest(w: *Window) !void {
+    switch (shell.update(&w.ui, w.cfg, w.machine.* != null)) {
+        .none => {},
+        .quit => w.quit = true,
+        // The EEPROM is a battery: it survives a reset, so it goes out to disk
+        // and comes back in around the machine being rebuilt. The board's own
+        // service menu is what writes it, and losing that on every reset would
+        // make the menu pointless.
+        .reset => if (w.machine.*) |*m| {
+            saveNv(w);
+            startMachine(w.c, w.cpu, m);
+            loadNv(w.io, w.c, w.set);
+            w.frames = 0;
+        },
+        .load => |p| loadIntoWindow(w, p),
+        // Numbered by frame, so holding the key down never overwrites the shot
+        // before it and the order they were taken in is the order they sort in.
+        .screenshot => if (w.machine.* != null) {
+            var buf: [shell.max_path]u8 = undefined;
+            const shot_path = std.fmt.bufPrintZ(&buf, "{s}.{d}.png", .{ w.set, w.frames }) catch return;
+            if (rl.ExportImage(fbImage(w.c), shot_path.ptr)) {
+                w.ui.status("wrote {s}", .{shot_path});
+            } else w.ui.status("cannot write {s}", .{shot_path});
+        },
+    }
+}
+
+/// Swaps the running machine for the set at `path`. A set that will not load
+/// says so in the status line and leaves the old one running.
+fn loadIntoWindow(w: *Window, path: []const u8) void {
+    var next = loadSet(w.gpa, w.io, path, null, &w.diag) catch {
+        w.ui.status("{s}: {s}", .{ std.fs.path.basename(path), w.diag.message() });
+        return;
+    };
+    saveNv(w);
+    if (w.machine.*) |*old| old.deinit(w.gpa);
+    w.machine.* = next;
+    w.set = keepPath(&w.path_buf, path);
+    startMachine(w.c, w.cpu, &next);
+    loadNv(w.io, w.c, w.set);
+    describeBoard(&w.ui, &next, w.set);
+    w.ui.status("{s}: {d} KiB program, {d} KiB graphics", .{
+        std.fs.path.basename(w.set),
+        next.rom.program.len >> 10,
+        next.rom.gfx.len >> 10,
+    });
+    w.frames = 0;
+}
+
+fn saveNv(w: *Window) void {
+    flushNv(w.io, w.c, w.set) catch |err| w.ui.status("cannot save settings: {t}", .{err});
+}
+
+/// What the menu changed since last frame, applied to the window, the mixer
+/// and the two files this program writes.
+fn applyOptions(w: *Window) void {
+    if (w.ui.dirty) {
+        saveConfig(w.io, w.args.config, w.cfg.*) catch |err| w.ui.status("cannot save options: {t}", .{err});
+        w.ui.dirty = false;
+    }
+    if (w.cfg.fullscreen != w.applied_fullscreen) {
+        rl.ToggleBorderlessWindowed();
+        w.applied_fullscreen = w.cfg.fullscreen;
+    }
+    if (!w.cfg.fullscreen and w.cfg.scale != w.applied_scale) {
+        rl.SetWindowSize(windowW(w.cfg.scale), windowH(w.cfg.scale));
+        w.applied_scale = w.cfg.scale;
+    }
+    // The mixer is where the volume knob lives, so muted is volume 0.
+    w.c.mixer.volume_pct = if (w.cfg.audio) w.cfg.volume else 0;
+    if (w.c.eeprom.dirty and rl.GetTime() >= w.nv_next) {
+        saveNv(w);
+        w.nv_next = rl.GetTime() + nv_write_seconds;
+    }
+}
+
+/// Runs the machine for as long as this drawn frame is worth, and answers
+/// whether it ran at all.
+fn stepFrames(w: *Window) !bool {
+    const running = w.machine.* != null and !w.ui.open and (!w.ui.paused or w.ui.step);
+    if (!running) {
+        w.c.inputs = .{};
+    } else {
+        // A paused machine owes exactly one frame; a fast-forwarded one runs
+        // several per drawn frame. Either way the recording still gets one word
+        // per emulated frame, so a replay of it is a replay.
+        const steps: u32 = if (w.ui.step) 1 else if (w.ui.fast) fast_forward_frames else 1;
+        for (0..steps) |_| {
+            w.c.inputs = if (w.replay) |r| r.at(w.frames) else readPanel(w.cfg.*);
+            if (w.log) |*r| try record(r, w.gpa, w.c.inputs);
+            scheduler.runFrame(w.c, w.cpu);
+            w.frames += 1;
+            // Drained inside the loop: the ring holds well under a
+            // fast-forwarded burst, so it has to go out as it is made.
+            if (w.has_audio) drainAudio(w.c, w.stream);
+        }
+        w.ui.step = false;
+    }
+    w.ui.pad = w.c.inputs.pad[0];
+    w.ui.panel = w.c.inputs.panel;
+    w.ui.six = w.cfg.buttons == .six;
+    return running;
+}
+
+/// Idle and paused frames have no audio to pace against, so the timer takes
+/// over; a running game hands pacing back to the ring buffer. Fast-forward
+/// paces on the timer too: capping the *drawn* frames at the video rate is what
+/// makes it a fixed multiple of full speed rather than as fast as the box
+/// happens to be.
+fn paceDrawing(w: *Window, running: bool) void {
+    const want_fps: c_int = if (w.machine.* == null)
+        snow_fps
+    else if (!running)
+        idle_fps
+    else if (w.has_audio and !w.ui.fast)
+        0
+    else
+        video_fps;
+    if (want_fps == w.target_fps) return;
+    rl.SetTargetFPS(want_fps);
+    w.target_fps = want_fps;
+}
+
+fn drawFrame(w: *Window) void {
+    rl.BeginDrawing();
+    if (w.machine.* != null) {
+        rl.UpdateTexture(w.tex, &w.c.v.fb);
+        drawPicture(w.tex, video.width, video.height);
+        if (w.cfg.scanlines) shell.drawScanlines(video.height);
+    } else {
+        w.flakes.step(&w.snow_px);
+        rl.UpdateTexture(w.snow_tex, &w.snow_px);
+        drawPicture(w.snow_tex, snow.width, snow.height);
+        if (w.cfg.scanlines) shell.drawScanlines(snow.height);
+        shell.drawIdlePrompt();
+    }
+    shell.draw(&w.ui, w.cfg);
+    rl.EndDrawing();
 }
 
 /// The board's refresh, rounded to whole frames a second: only the timer

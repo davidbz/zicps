@@ -1,4 +1,4 @@
-//! The idle screen (DESIGN.md §5.2): a CRT tuned to a dead channel.
+//! The idle screen: a CRT tuned to a dead channel.
 //!
 //! Fills a small RGBA texture the frontend stretches over the window, so the
 //! per-frame cost is 19200 pixels however big the window is. No raylib here

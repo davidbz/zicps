@@ -1,11 +1,11 @@
 #!/bin/bash
 #
-# Fetches ctr's qsound-hle, the reference the QSound core is diffed against
-# (DESIGN.md §9 M4). It lands in testdata/, which is gitignored: this is a
+# Fetches ctr's qsound-hle, the reference the QSound core is diffed against.
+# It lands in testdata/, which is gitignored: this is a
 # test-only dependency and never part of the emulator.
 #
 # The commit is pinned and every file is checksummed, so what the diff runs
-# against is the same code the deviation table in DESIGN.md was measured on.
+# against is the same code the deviation table was measured on.
 # Nothing here is required for a fresh checkout to be green — `zig build test`
 # skips the differential step when testdata/ is absent.
 

@@ -1,8 +1,8 @@
 //! The constant tables the DL-1425 carries in its mask ROM: the two panning
 //! mix curves, the linear one, and the FIR coefficient sets the pan filter is
-//! pointed at (DESIGN.md §7.3).
+//! pointed at.
 //!
-//! §7.3 rules out running the mask ROM — an LLE needs 8 KiB of program that
+//! Running the mask ROM is out of scope — an LLE needs 8 KiB of program that
 //! cannot be committed or fetched, and the whole audio path would skip on any
 //! machine without it. These are the other half of that ROM: not program, but
 //! about two kilobytes of coefficients that are as much a fact of the chip as
@@ -18,8 +18,8 @@
 //!     https://github.com/ValleyBell/qsound-hle for its full text.
 //!
 //! That is a redistribution of data, not of the emulator: the model in
-//! `qsound.zig` is written from the behaviour, and qsound-hle stays what
-//! DESIGN.md §11 calls it — the differential reference the model is checked
+//! `qsound.zig` is written from the behaviour, and qsound-hle stays the
+//! differential reference the model is checked
 //! against, fetched at test time and never linked into zicps.
 
 /// A pan register selects one of 33 positions in a mix curve — hard left to

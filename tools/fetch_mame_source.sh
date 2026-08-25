@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Fetches the three MAME files the board generator reads (DESIGN.md §8.1).
+# Fetches the three MAME files the board generator reads.
 # They land in testdata/, which is gitignored: MAME's driver is not part of
 # this emulator and is never linked into it. What ships is boards/, which is
 # committed — running this is only needed to rewrite that.

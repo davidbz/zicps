@@ -1,7 +1,7 @@
 # Board file for MAME's `sf2ceja`, written by tools/mame_to_board.zig.
 #
 # The register mapping, the bank table and the Kabuki key are what a
-# working board keeps in the RAM its battery holds up (DESIGN.md §8.1),
+# working board keeps in the RAM its battery holds up,
 # transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
 # and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
 #

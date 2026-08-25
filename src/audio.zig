@@ -7,13 +7,13 @@
 //! bytes on every machine.
 //!
 //! Copied from zigesis, tests and all, because none of this is one machine's:
-//! it is a rate fraction and a filter. Two things are this machine's, and both
-//! landed at M3 — a QSound board has one sound chip rather than two, so there
+//! it is a rate fraction and a filter. Two things about it are
+//! this machine's — a QSound board has one sound chip rather than two, so there
 //! is one source and no chip to name it by, and its 24.038 kHz has to come *up*
 //! to 48 kHz where the Genesis's chips came down. The bank is the same bank
 //! either way: what changes is that an input sample can finish more than one
 //! output frame, and that the cutoff is set by whichever rate is lower
-//! (DESIGN.md §6.2).
+//!.
 
 const std = @import("std");
 

@@ -254,7 +254,7 @@ const bright_full = bright_floor + nibble_mask * bright_step;
 /// Copies the palette out of graphics RAM, one page per enabled bit of the
 /// board's palette control register.
 ///
-/// The quirk (DESIGN.md §7.1): a page whose bit is clear is skipped, but the
+/// The quirk: a page whose bit is clear is skipped, but the
 /// *source* only starts advancing once something has been copied — so a clear
 /// bit 0 does not lose page 0, it lands its colours in the first page that is
 /// enabled. Later clear bits really do skip.
@@ -610,8 +610,8 @@ const star_row_pixels = 16;
 const star_pos_mask = 0x1ff;
 /// A star byte is eight pixels of the low plane, highest bit first.
 const star_byte_pixels = 8;
-/// An entry whose low five bits are all ones is not a star; otherwise they are
-/// how far into its column the star sits.
+/// The low five bits of an entry are how far into its column the star sits;
+/// the one value 0x0f means no star at all.
 const star_no_star = 0x0f;
 const star_x_mask = 0x1f;
 const star_color_mask = 0xe0;
@@ -691,7 +691,7 @@ fn nameOffset(comptime m: Tilemap, row: u32, col: u32) u32 {
 
 /// A tile code is not an address. The B-board's PAL switches banks of graphics
 /// under the video chip, and which bank a code lands in is what the board file
-/// records (DESIGN.md §8.1). A code no range claims draws nothing at all.
+/// records. A code no range claims draws nothing at all.
 fn bankMap(b: *const board.Board, layer: board.Layer, shift: u3, code: u16) ?u32 {
     const wide = @as(u32, code) << shift;
     const wanted = @as(u8, 1) << @intFromEnum(layer);
