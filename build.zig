@@ -276,7 +276,7 @@ pub fn build(b: *std.Build) void {
     const modules = [_]*std.Build.Module{
         board,  romset, video,  cps,        scheduler, input,  config,
         audio,  kabuki, qsound, soundboard, snow,      boards, system_tests,
-        ym2151, oki,     state,
+        ym2151, oki,    state,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });
