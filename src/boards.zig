@@ -10,8 +10,14 @@
 //! It is a fallback and not a rule: a board file the user put beside their set
 //! wins, because theirs is the board in front of them and this is a table.
 
+//! Loading a set is here for the same reason: which of the two board files
+//! wins is the whole subject of this file, and the window, the sweep and the
+//! video differential all have to make the same choice.
+
 const std = @import("std");
+const builtin = @import("builtin");
 const board = @import("board");
+const romset = @import("romset");
 const list = @import("list");
 
 /// The board file for a set of this name, or null for a set no board here
@@ -26,9 +32,119 @@ pub fn find(name: []const u8) ?[]const u8 {
     return null;
 }
 
+// -------------------------------------------------------------- loading a set
+
+/// A set and the board file that says how to read it, loaded together because
+/// neither is any use without the other.
+pub const Machine = struct {
+    b: board.Board,
+    rom: romset.Set,
+    /// Which board file this machine was built from, for the card: the name
+    /// of the file the user supplied, or of the board that shipped with this
+    /// build. Only the load knows which of the two won.
+    source: [max_source]u8 = @splat(0),
+
+    pub fn from(m: *const Machine) []const u8 {
+        return std.mem.sliceTo(&m.source, 0);
+    }
+
+    pub fn deinit(m: *Machine, gpa: std.mem.Allocator) void {
+        m.rom.deinit(gpa);
+    }
+};
+
+/// Room for a file name on the card. Not a path: a card that says which
+/// directory it read is a card nobody can read.
+pub const max_source = 64;
+
+/// A board file is text a person typed.
+pub const max_board_bytes = 64 << 10;
+
+/// Reads a set and its board file, saying why in `diag` rather than exiting:
+/// the menu can load a set that turns out to be wrong without the window
+/// having to close.
+pub fn loadSet(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    set: []const u8,
+    board_path: ?[]const u8,
+    diag: *board.Diag,
+) !Machine {
+    // The board file lives beside the set under the set's own name, whether the
+    // set is a directory or a zip.
+    var default_board: [std.fs.max_path_bytes]u8 = undefined;
+    const board_file = board_path orelse beside(&default_board, set, ".board") catch {
+        diag.set("path too long", .{});
+        return error.BadBoardFile;
+    };
+    // What a set is called is what MAME calls it, which is what the boards
+    // that ship with this build are named after. The user's
+    // own file still wins: theirs is the board in front of them, and ours is
+    // a transcription of a table.
+    const name = std.fs.path.stem(std.fs.path.basename(board_file));
+
+    var machine = Machine{ .b = undefined, .rom = undefined };
+    const cwd = std.Io.Dir.cwd();
+    var owned = true;
+    const text = cwd.readFileAlloc(io, board_file, gpa, .limited(max_board_bytes)) catch |err| shipped: {
+        const built_in = if (board_path == null) find(name) else null;
+        if (built_in) |ours| {
+            owned = false;
+            label(&machine.source, "{s} (built in)", .{name});
+            break :shipped ours;
+        }
+        diag.set("no board file at {s} ({t}), and none for `{s}` ships with this build", .{ board_file, err, name });
+        return error.BadBoardFile;
+    };
+    defer if (owned) gpa.free(text);
+    if (owned) label(&machine.source, "{s}", .{std.fs.path.basename(board_file)});
+
+    machine.b = try board.parse(text, diag);
+    machine.rom = try romset.load(gpa, io, cwd, set, &machine.b, diag);
+    return machine;
+}
+
+/// Fills a card's line, cut to fit rather than refused: half a name still says
+/// which file this was.
+fn label(into: *[max_source]u8, comptime fmt: []const u8, args: anytype) void {
+    var w = std.Io.Writer.fixed(into[0 .. into.len - 1]);
+    w.print(fmt, args) catch {};
+    into[w.buffered().len] = 0;
+}
+
+/// `sets/game.zip`, `sets/game` and the `sets/game/` a shell completes a
+/// directory to all look beside themselves for `sets/game.board`.
+pub fn beside(buf: []u8, path: []const u8, suffix: []const u8) ![]const u8 {
+    // What basename splits on, which on Windows is both slashes and not just
+    // `sep_str`. A backslash is a legal character in a POSIX file name, so the
+    // set only widens where it really is a separator.
+    const seps = if (builtin.os.tag == .windows)
+        std.fs.path.sep_str_windows ++ std.fs.path.sep_str_posix
+    else
+        std.fs.path.sep_str_posix;
+    const trimmed = std.mem.trimEnd(u8, path, seps);
+    const name = std.fs.path.basename(trimmed);
+    const dot = std.mem.lastIndexOfScalar(u8, name, '.') orelse
+        return std.fmt.bufPrint(buf, "{s}{s}", .{ trimmed, suffix });
+    return std.fmt.bufPrint(buf, "{s}{s}", .{ trimmed[0 .. trimmed.len - (name.len - dot)], suffix });
+}
+
 // ------------------------------------------------------------------- tests
 
 const testing = std.testing;
+
+test "the board file is looked for beside the set, under the set's own name" {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    try testing.expectEqualStrings("sets/game.board", try beside(&buf, "sets/game.zip", ".board"));
+    try testing.expectEqualStrings("sets/game.board", try beside(&buf, "sets/game", ".board"));
+    // A dot in a directory on the way there is not the set's extension.
+    try testing.expectEqualStrings("my.sets/game.board", try beside(&buf, "my.sets/game", ".board"));
+}
+
+test "a set named with a trailing slash still finds its board file" {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    try testing.expectEqualStrings("sets/game.board", try beside(&buf, "sets/game/", ".board"));
+}
 
 test "every board that ships parses" {
     for (list.files) |file| {

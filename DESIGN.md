@@ -1070,6 +1070,93 @@ a named bug, and the nice-to-haves of §5.1 as they earn their keep.
 Acceptance: every set the author can test boots and plays, and every remaining
 issue has a reproduction through the replay harness.
 
+`zig build compat -- roms` is the sweep, `zig build video-diff -- <set> <dump>`
+is the differential, and the recent-sets list is the nice-to-have §5.1 had left
+owed. What the sweep says about the seven sets on this machine, at its default
+1200 frames and `-Doptimize=ReleaseFast`:
+
+```
+set              frames  picture     still  sound
+captcomm              -  the set has no cce_23f.8f, and nothing in it has crc 42c814c5 either
+cawing             1200  drawing         0  peak 11461
+dino               1200  drawing         7  peak 11695
+ffight             1200  drawing         8  peak 17365
+mercs              1200  drawing         0  peak 12023
+punisher           1200  drawing         0  peak 6250
+sf2                1200  drawing         0  peak 15355
+
+6 booted, 1 refused, 0 worth a window
+```
+
+Six boards, three of them QSound and three of them YM2151 and OKI, each with a
+credit in it and a game started, each drawing a picture that changes on all but
+a handful of frames and each making a sound. `captcomm` refuses for the reason
+M5.5 already wrote down: the zip is `captcommr1`, and this emulator verifies a
+set rather than identifying one.
+
+The two readings the sweep gets out of a board are only as good as what it does
+to it, and both had to be corrected by looking rather than by reasoning. Booted
+and left alone, `dino` and `punisher` read `silent` — an attract mode is silent
+on purpose, so the sweep now puts a coin in. Given one coin and one press of
+start, `sf2` and `cawing` read still for half the run — they were on their legal
+notice when start came and were sitting on their title screens by the time it
+mattered, so start now repeats every two seconds until the run ends. And `mercs`
+read `BLANK`, which was an attract-mode fade to black caught on the last frame:
+blank now means flat on *every* frame of the run. Each of those was a bug in the
+instrument, and each was found the way §10 says to find one — by rendering the
+frame and looking at it.
+
+**Ceilings left behind.**
+
+- **A sweep of seven, not of 194.** The instrument runs over whatever sets are
+  present, and what is present here is the same seven M5.5 could boot. The other
+  187 board files are still untested, and what the numbers above establish is
+  that the sweep reports honestly on a set it can read, not that the library
+  works. Anyone with the sets can now find out in about four minutes.
+- **The sweep is not a test and does not gate.** It has its own build step
+  rather than hanging off `zig build test`, because it needs ROMs the repo does
+  not have and must not, and because nothing it prints is a pass or a fail.
+  `flagged` — halted, blank, or still for the whole run — is a heuristic that
+  says where to look, and a board that legitimately draws one still picture for
+  twenty seconds would trip it.
+- **One coin, one player, no service menu.** The panel the sweep drives is a
+  coin and start, which is enough to get a one-player game running and is not
+  enough to reach a board's own settings. There is still no DIP switch model
+  (M5.5's ceiling), and the sweep writes no EEPROM sidecar, so a QSound set is
+  swept on a battery nobody has ever set up — the same board a first-time owner
+  would switch on, which is the right default and is not every board.
+- **The differential's MAME side is unverified here.** `tools/mame_video_dump.lua`
+  is written against `cps_state`'s own share names and has never been run: no
+  MAME binary is installed on this machine. Everything downstream of it has
+  been: a dump of `dino`'s own state at frame 1200, written in the Lua script's
+  format and fed back through `video-diff`, reads, renders and comes out as the
+  right picture — a cutscene, 92 colours, three scroll layers where the register
+  file says they are. That round trip also found the one bug in the reader,
+  which refused a file of exactly the size a dump is. So what is unproven is
+  exactly one thing: whether those three share names are what a MAME build
+  exposes.
+- **The differential is a frame ahead on sprites, and knows it.** The palette is
+  copied on a write to the base register and the object list is latched at
+  vblank, so a dump taken at the end of MAME's frame *N* renders here with frame
+  *N*'s objects where the board would have drawn frame *N-1*'s. A sprite that
+  moved between the two frames is one frame ahead in this picture and nothing
+  else is. Two pictures are compared by eye rather than by hash for this reason
+  among others.
+- **The recent list holds paths, not sets.** Eight of them, most recent first,
+  in the options file. A row is a path that loaded once; nothing checks whether
+  it still does, because a load that fails already says so and a list that
+  quietly dropped the row someone was reaching for would be worse. A path longer
+  than 256 bytes is not remembered at all, since half a path is a path to
+  nowhere.
+- **Per-channel muting is still owed, and is M8's.** §5.1 lists it under
+  nice-to-haves and M5 deferred it; M8 is where the audio channel scope lands
+  and where a mute per channel costs nothing on top.
+- **The window itself is still unproven in this environment.** The recent list
+  is pinned by a round trip through the config file, and the shell code that
+  draws and walks it compiles, but no window has opened on this machine — X is
+  present and unauthorized. That is the same ceiling M5.5 wrote down, and it is
+  the one thing here a person with a display closes in a minute.
+
 ### M8: Debug tooling — deferred by design
 
 Deliverables: the disassembling trace, the video inspectors of §6.3, and the

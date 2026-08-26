@@ -7,7 +7,6 @@
 //! build graph is what enforces that rather than anyone remembering.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const board = @import("board");
 const romset = @import("romset");
 const cps = @import("cps");
@@ -24,9 +23,9 @@ const shell = @import("shell");
 const rl = @cImport(@cInclude("raylib.h"));
 
 const Config = config.Config;
+const Machine = boards.Machine;
 
-/// A board file is text a person typed; a replay log is one word per frame.
-const max_board_bytes = 64 << 10;
+/// A replay log is one word per frame.
 const max_replay_bytes = 16 << 20;
 const max_config_bytes = 64 << 10;
 
@@ -157,82 +156,6 @@ fn parseArgs(args: *std.process.Args.Iterator) Options {
     return o;
 }
 
-/// A set and the board file that says how to read it, loaded together because
-/// neither is any use without the other.
-const Machine = struct {
-    b: board.Board,
-    rom: romset.Set,
-    /// Which board file this machine was built from, for the card: the name
-    /// of the file the user supplied, or of the board that shipped with this
-    /// build. Only the load knows which of the two won.
-    source: [max_source]u8 = @splat(0),
-
-    fn from(m: *const Machine) []const u8 {
-        return std.mem.sliceTo(&m.source, 0);
-    }
-
-    fn deinit(m: *Machine, gpa: std.mem.Allocator) void {
-        m.rom.deinit(gpa);
-    }
-};
-
-/// Room for a file name on the card. Not a path: a card that says which
-/// directory it read is a card nobody can read.
-const max_source = 64;
-
-/// Reads a set and its board file, saying why in `diag` rather than exiting:
-/// the menu can load a set that turns out to be wrong without the window
-/// having to close.
-fn loadSet(
-    gpa: std.mem.Allocator,
-    io: std.Io,
-    set: []const u8,
-    board_path: ?[]const u8,
-    diag: *board.Diag,
-) !Machine {
-    // The board file lives beside the set under the set's own name, whether the
-    // set is a directory or a zip.
-    var default_board: [std.fs.max_path_bytes]u8 = undefined;
-    const board_file = board_path orelse beside(&default_board, set, ".board") catch {
-        diag.set("path too long", .{});
-        return error.BadBoardFile;
-    };
-
-    // What a set is called is what MAME calls it, which is what the boards
-    // that ship with this build are named after. The user's
-    // own file still wins: theirs is the board in front of them, and ours is
-    // a transcription of a table.
-    const name = std.fs.path.stem(std.fs.path.basename(board_file));
-
-    var machine = Machine{ .b = undefined, .rom = undefined };
-    const cwd = std.Io.Dir.cwd();
-    var owned = true;
-    const text = cwd.readFileAlloc(io, board_file, gpa, .limited(max_board_bytes)) catch |err| shipped: {
-        const built_in = if (board_path == null) boards.find(name) else null;
-        if (built_in) |ours| {
-            owned = false;
-            label(&machine.source, "{s} (built in)", .{name});
-            break :shipped ours;
-        }
-        diag.set("no board file at {s} ({t}), and none for `{s}` ships with this build", .{ board_file, err, name });
-        return error.BadBoardFile;
-    };
-    defer if (owned) gpa.free(text);
-    if (owned) label(&machine.source, "{s}", .{std.fs.path.basename(board_file)});
-
-    machine.b = try board.parse(text, diag);
-    machine.rom = try romset.load(gpa, io, cwd, set, &machine.b, diag);
-    return machine;
-}
-
-/// Fills a card's line, cut to fit rather than refused: half a name still says
-/// which file this was.
-fn label(into: *[max_source]u8, comptime fmt: []const u8, args: anytype) void {
-    var w = std.Io.Writer.fixed(into[0 .. into.len - 1]);
-    w.print(fmt, args) catch {};
-    into[w.buffered().len] = 0;
-}
-
 /// The half of a load failure that only the command line can print: what a
 /// board file is for, which is not obvious the first time zicps refuses to
 /// start. The menu says the same thing with less room, so it says less.
@@ -265,7 +188,7 @@ pub fn main(init: std.process.Init) !void {
     var machine: ?Machine = null;
     defer if (machine) |*m| m.deinit(gpa);
     if (o.set.len != 0) {
-        machine = loadSet(gpa, io, o.set, o.board, &diag) catch {
+        machine = boards.loadSet(gpa, io, o.set, o.board, &diag) catch {
             std.debug.print("{s}: {s}\n", .{ o.set, diag.message() });
             explainBoard();
             fail();
@@ -397,23 +320,6 @@ fn report(c: *const cps.Cps, cpu: *const scheduler.Cpu, sound: *const Sound, fra
 }
 
 // ------------------------------------------------------------------- files
-
-/// `sets/game.zip`, `sets/game` and the `sets/game/` a shell completes a
-/// directory to all look beside themselves for `sets/game.board`.
-fn beside(buf: []u8, path: []const u8, suffix: []const u8) ![]const u8 {
-    // What basename splits on, which on Windows is both slashes and not just
-    // `sep_str`. A backslash is a legal character in a POSIX file name, so the
-    // set only widens where it really is a separator.
-    const seps = if (builtin.os.tag == .windows)
-        std.fs.path.sep_str_windows ++ std.fs.path.sep_str_posix
-    else
-        std.fs.path.sep_str_posix;
-    const trimmed = std.mem.trimEnd(u8, path, seps);
-    const name = std.fs.path.basename(trimmed);
-    const dot = std.mem.lastIndexOfScalar(u8, name, '.') orelse
-        return std.fmt.bufPrint(buf, "{s}{s}", .{ trimmed, suffix });
-    return std.fmt.bufPrint(buf, "{s}{s}", .{ trimmed[0 .. trimmed.len - (name.len - dot)], suffix });
-}
 
 /// XDG on Linux, `%APPDATA%` on Windows, and the working directory when the
 /// environment says nothing — options are worth persisting, not worth failing
@@ -758,6 +664,7 @@ fn windowed(
     // Where this set's own files go. `set.len == 0` is the idle window.
     if (args.set.len != 0) w.set = keepPath(&w.path_buf, args.set);
     if (machine.*) |*m| {
+        remember(cfg, &w.ui, w.set);
         startMachine(c, cpu, m);
         loadNv(io, c, w.set);
         describeBoard(&w.ui, m, w.set);
@@ -819,7 +726,7 @@ fn serveRequest(w: *Window) !void {
 /// Swaps the running machine for the set at `path`. A set that will not load
 /// says so in the status line and leaves the old one running.
 fn loadIntoWindow(w: *Window, path: []const u8) void {
-    var next = loadSet(w.gpa, w.io, path, null, &w.diag) catch {
+    var next = boards.loadSet(w.gpa, w.io, path, null, &w.diag) catch {
         w.ui.status("{s}: {s}", .{ std.fs.path.basename(path), w.diag.message() });
         return;
     };
@@ -827,6 +734,7 @@ fn loadIntoWindow(w: *Window, path: []const u8) void {
     if (w.machine.*) |*old| old.deinit(w.gpa);
     w.machine.* = next;
     w.set = keepPath(&w.path_buf, path);
+    remember(w.cfg, &w.ui, w.set);
     startMachine(w.c, w.cpu, &next);
     loadNv(w.io, w.c, w.set);
     describeBoard(&w.ui, &next, w.set);
@@ -836,6 +744,13 @@ fn loadIntoWindow(w: *Window, path: []const u8) void {
         next.rom.gfx.len >> 10,
     });
     w.frames = 0;
+}
+
+/// A set that loaded goes on the recent list, which lives in the options file:
+/// marking the config dirty is what gets it written, the same as a menu toggle.
+fn remember(cfg: *Config, ui: *shell.Ui, path: []const u8) void {
+    cfg.remember(path);
+    ui.dirty = true;
 }
 
 fn saveNv(w: *Window) void {
@@ -1013,20 +928,6 @@ test "a recording is a replay of itself" {
     for (frames, 0..) |in, i| try testing.expectEqual(in, r.at(@intCast(i)));
     try testing.expectEqual(frames.len * log_frame_bytes, log.items.len);
 }
-
-test "the board file is looked for beside the set, under the set's own name" {
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    try testing.expectEqualStrings("sets/game.board", try beside(&buf, "sets/game.zip", ".board"));
-    try testing.expectEqualStrings("sets/game.board", try beside(&buf, "sets/game", ".board"));
-    // A dot in a directory on the way there is not the set's extension.
-    try testing.expectEqualStrings("my.sets/game.board", try beside(&buf, "my.sets/game", ".board"));
-}
-
-test "a set named with a trailing slash still finds its board file" {
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    try testing.expectEqualStrings("sets/game.board", try beside(&buf, "sets/game/", ".board"));
-}
-
 test "the settings sidecar adds its extension rather than replacing one" {
     // A directory set and a zip of the same name are two different sets, and
     // two boards: they must not share a battery.
