@@ -9,7 +9,6 @@
 //!
 //! It is a fallback and not a rule: a board file the user put beside their set
 //! wins, because theirs is the board in front of them and this is a table.
-
 //! Loading a set is here for the same reason: which of the two board files
 //! wins is the whole subject of this file, and the window, the sweep and the
 //! video differential all have to make the same choice.
