@@ -220,11 +220,14 @@ Nice to have, only after all of the required list ships: recent-sets list,
 per-channel audio muting, fast-forward and frame advance, screenshot hotkey,
 CRT-style scanline overlay.
 
-Explicitly out of scope: CPS-1 boards with the YM2151 and OKI ADPCM sound
-hardware (this is a QSound machine; that path is a different sound board and a
-milestone nobody has asked for), CP System II, netplay, cheats, shader
-pipelines, per-game databases, and any protection device a board file cannot
-describe.
+Explicitly out of scope: CP System II, netplay, cheats, shader pipelines,
+per-game databases, and any protection device a board file cannot describe.
+
+CPS-1 boards with the YM2151 and OKI ADPCM sound hardware were on that list
+until M9 (§9) took them off it. They were excluded for being a second sound
+board on a machine this project calls a QSound machine, which is still what they
+are — but they are also 175 of the 194 sets in the library, and a library that
+size where nine sets in ten are silent is not the thing §1 set out to build.
 
 ### 5.2 The window
 
@@ -441,6 +444,41 @@ this document at that point:
   with `0xff` in its top byte, drawn last entry first so the first entry a game
   writes ends up on top, and double-buffered: the chip takes its copy at vblank,
   so a list written during a frame is the one drawn in the next.
+
+### 7.5 The other sound board: YM2151 and OKI M6295
+
+Every CPS-1 board that is not a Dash board carries a different sound board, and
+175 of the 194 sets in the library are on it. It is a plainer thing than §7.2's:
+a Z80 at 3.579545 MHz with no Kabuki in front of it, an OPM for the music and an
+ADPCM chip for speech and percussion.
+
+The Z80's map, from MAME's `sub_map`: fixed ROM at `0000-7fff`, the bank window
+at `8000-bfff`, 2 KiB of RAM at `d000-d7ff`, the YM2151 at `f000/f001`, the OKI
+at `f002`, the bank register at `f004` (bit 0 only, so two banks), the OKI's
+pin 7 at `f006`, and the two command latches at `f008` and `f00a`. The bank
+window starts at `0x10000` in the audio region, which is where §7.2's board puts
+it too.
+
+Two differences from the Dash board matter more than the map does:
+
+- **The 68000 posts commands into latches, not into shared RAM.** It writes
+  `0x800180` and `0x800188`, byte-wide, write-only; the Z80 reads them back at
+  `f008`/`f00a`. There is no window either CPU can read the other's memory
+  through, so §7.2's shared RAM has no counterpart here.
+- **Nothing on the board is periodic.** §7.2's Z80 takes an interrupt off a
+  divider at 250 Hz. This one takes its interrupt from the YM2151's own IRQ pin,
+  driven by the chip's timers, which the driver programs. The divider and the
+  chip swap places, and the sound board's interrupt stops being something the
+  scheduler can count out on its own.
+
+The clocks are the awkward part. The YM2151 and the Z80 both run at 3.579545
+MHz, which is not a divisor of §3.3's 120 MHz reference — but it is exactly
+315/88 MHz, so the ratio is a small fraction rather than an irrational one: 21
+Z80 cycles to 704 reference ticks, and 21 YM2151 samples (the chip divides its
+clock by 64) to 45056. Both get the debt counter §3.3 already uses for QSound's
+4992. The OKI is the easy one: 16 MHz over 16 is 1 MHz, over 132 is 7575.76 Hz,
+and 15840 reference ticks divide that exactly — 19800 when a game pulls pin 7
+low and asks for 6060.6 Hz instead.
 
 ## 8. The Board File, ROM Sets, Persistence
 
@@ -931,12 +969,15 @@ transcribes rather than invents.
   says `Untested` in its own header. A wrong mapper in MAME's table is a wrong
   mapper here, and MAME's comments say plainly that some of these PALs are
   substitutes for dumps nobody has.
-- **The library is video-only outside QSound.** A plain CPS-1 board's board file
-  carries no `audio` or `qsound` lines, because §5.1 puts the YM2151 and the OKI
-  out of scope. Those 175 sets boot, draw and are silent, through the same path
-  M3 already had for a set with no sound board. There is also no DIP switch
+- **The library is video-only outside QSound, until M9.** A plain CPS-1 board's
+  board file carries no `audio` or `qsound` lines, because §5.1 put the YM2151
+  and the OKI out of scope when these files were written. Those 175 sets boot,
+  draw and are silent, through the same path M3 already had for a set with no
+  sound board. M9 is what changes that, and it regenerates every one of these
+  files to carry the two regions they are missing. There is also no DIP switch
   model, so they run on their default settings and their service menus are
-  unreachable — the EEPROM sets from M5 are the only ones that remember anything.
+  unreachable — the EEPROM sets from M5 are the only ones that remember
+  anything.
 - **The CRC verifies, it does not identify.** A zip under the wrong name finds
   no board rather than the right one, which is the same rule MAME follows and
   the reason `roms/captcomm.zip` here turned out to be `captcommr1`: 12 of 12
@@ -983,6 +1024,63 @@ Deliverables: the disassembling trace, the video inspectors of §6.3, and the
 audio channel scope. Deferred for zigesis's reason: the debugger is worth most
 once there is a list of things to point it at, and tracing, replay, frame
 advance and per-channel mute already exist by then.
+
+### M9: The other sound board — YM2151 and OKI M6295
+
+The 175 sets §7.5 describes, playing. This is the largest single addition to
+what the machine can be heard doing since M4, and it is the only milestone that
+reopens a §5.1 exclusion rather than closing one.
+
+Deliverables:
+
+- `src/ym2151.zig`: the OPM. Eight channels of four operators, the eight
+  algorithms, the envelope generator, the LFO with its four waveforms and its
+  per-channel PMS/AMS, DT1 and DT2, the noise generator on channel 8's fourth
+  operator, and the two timers — which are not an accessory here but the thing
+  that drives the Z80's interrupt (§7.5).
+- `src/oki.zig`: the M6295. Four voices of Dialogic ADPCM off a shared sample
+  table, the phrase-start protocol the driver uses to key them, and the pin 7
+  divider, which a game may change while it runs.
+- One sound board, two boards. `soundboard.zig` gains a tag saying which board
+  it is, and its bus branches on it. Not two modules and not an interface: the
+  Z80, the bank window and the ROM views are the same on both, and only the map
+  above them differs, so the difference belongs where it is — in the switch that
+  is already there.
+- The two command latches on the 68000 side, at `0x800180` and `0x800188`.
+- An `oki` region in the board file, beside `audio` and `qsound`, and the
+  ceiling that goes with it: 256 KiB, which is what all 213 sets in MAME's
+  CPS-1 driver use.
+- `tools/mame_to_board.zig` stops dropping the audio regions of a set with no
+  QSound chip, and `boards/` is regenerated: 175 files gain their `audio` and
+  `oki` lines. The library is the deliverable as much as the chips are.
+- The timing of §7.5 in the scheduler: the Z80 and the YM2151 on debt counters
+  against the 120 MHz reference, the OKI on an exact divisor, and the two chips
+  summed into one stream at the OPM's rate — the OKI held between its own
+  samples, which is what it physically does.
+
+Acceptance:
+
+- **The OPM is diffed, not eyeballed.** The same register log driven into this
+  core and into Nuked-OPM, compared sample by sample, wired exactly as M4 wired
+  qsound-hle: fetched into gitignored `testdata/`, a `zig build opm-ref` step of
+  its own, folded into `zig build test` only when the reference is present, so a
+  fresh checkout stays green without it. M4's experience is the reason this is
+  listed first rather than last: the QSound core's accuracy came from the diff,
+  not from listening.
+- The OKI is checked against its own decoder: a known ADPCM phrase decoded to
+  PCM and pinned, plus the step-index clamp at both ends, which is where every
+  ADPCM implementation goes wrong.
+- A recorded run of a plain CPS-1 set — `sf2`, since it is one of the seven
+  M5.5 booted — hashes identically twice, audio included, under the replay
+  harness of §10.
+- M7's sweep reports something heard for every set that has an `audio` region,
+  which is the whole library minus the sets §8.2's ceilings already exclude.
+
+Explicitly not in M9: the 68000's clock. `cps1_10MHz` is MAME's base config and
+`cps1_12MHz` the override, so roughly half the library currently runs its 68000
+20% fast against §3.3's fixed 12 MHz. That is a real bug, it predates this
+milestone, and it will be tempting to blame on this milestone's timing work —
+which is exactly why it is named here and fixed on its own.
 
 ## 10. Testing Strategy Summary
 
