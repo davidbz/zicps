@@ -14,6 +14,7 @@ const scheduler = @import("scheduler");
 const kabuki = @import("kabuki");
 const qsound = @import("qsound");
 const audio = @import("audio");
+const state = @import("state");
 
 const testing = std.testing;
 
@@ -1245,3 +1246,73 @@ test "the chip plays the channel the driver set up, and a mute takes it out" {
     c.sound.q.muted = 0;
     try testing.expect(listen(c, &cpu, sound_frames).peak > 0);
 }
+
+// -------------------------------------------------------------- save states
+
+/// What the machine did over a stretch of frames: what it drew and what it
+/// played, both hashed. A state that is really the whole machine gives back the
+/// same pair whether the machine was run into that point or loaded into it.
+const Run = struct { hash: u64, heard: Audio };
+
+fn playOn(c: *cps.Cps, cpu: *scheduler.Cpu, frames: usize) Run {
+    const heard = listen(c, cpu, frames);
+    return .{ .hash = scheduler.hash(c, cpu), .heard = heard };
+}
+
+test "a save state round-trips the machine bit for bit, and a foreign one is refused" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const b, var rom = try loadSoundSet(&tmp);
+    defer rom.deinit(testing.allocator);
+
+    const c = try testing.allocator.create(cps.Cps);
+    defer testing.allocator.destroy(c);
+    c.* = .{ .board = b, .rom = rom };
+
+    var cpu: scheduler.Cpu = .{};
+    scheduler.reset(c, &cpu);
+    c.inputs.pad[0] = sound_command_value;
+
+    // Far enough in that there is something worth saving: the driver has taken
+    // its command and the chip is part way through a sample.
+    _ = listen(c, &cpu, sound_frames);
+
+    const file = try testing.allocator.create([state.bytes]u8);
+    defer testing.allocator.destroy(file);
+    state.save(c, &cpu, file);
+
+    const ran = playOn(c, &cpu, sound_frames);
+
+    // Somewhere else in the run entirely before loading, so a load that
+    // quietly did nothing could not pass what follows.
+    _ = listen(c, &cpu, sound_frames * 3);
+    try testing.expect(scheduler.hash(c, &cpu) != ran.hash);
+
+    // Out to a slot file and back in the way the shell does it, rather than
+    // straight out of the buffer. A state is exactly `state.bytes` long and
+    // `readFileAlloc` refuses a stream that *reaches* its cap, so a read
+    // capped at that number is one that refuses every state ever written —
+    // which is what shipped, and passed a test that never touched a file.
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = slot_file, .data = file });
+    const read = try tmp.dir.readFileAlloc(testing.io, slot_file, testing.allocator, state.limit);
+    defer testing.allocator.free(read);
+    try testing.expectEqual(@as(usize, state.bytes), read.len);
+
+    try state.load(c, &cpu, read);
+    try testing.expectEqual(ran, playOn(c, &cpu, sound_frames));
+
+    // And a state whose machine has a different shape is refused rather than
+    // loaded as garbage. The layout hash is in the header, so finding it is
+    // finding those eight bytes rather than knowing where they sit.
+    var stamp = std.mem.toBytes(std.mem.nativeToLittle(u64, state.layout_hash));
+    const at = std.mem.indexOf(u8, file[0..header_search], &stamp).?;
+    file[at] +%= 1;
+    try testing.expectError(error.FromAnotherBuild, state.load(c, &cpu, file));
+}
+
+/// How far into a state to look for the header's own fields. Comfortably past
+/// the header and nowhere near enough of the body to matter.
+const header_search = 64;
+
+/// Named the way `main.zig` names one, beside the set.
+const slot_file = "sound.zip.st1";

@@ -112,6 +112,16 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const state = b.addModule("state", .{
+        .root_source_file = b.path("src/state.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "cps", .module = cps },
+            .{ .name = "scheduler", .module = scheduler },
+        },
+    });
+
     const input = b.addModule("input", .{
         .root_source_file = b.path("src/input.zig"),
         .target = target,
@@ -184,6 +194,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "soundboard", .module = soundboard },
             .{ .name = "qsound", .module = qsound },
             .{ .name = "audio", .module = audio },
+            .{ .name = "state", .module = state },
         },
     });
 
@@ -265,7 +276,7 @@ pub fn build(b: *std.Build) void {
     const modules = [_]*std.Build.Module{
         board,  romset, video,  cps,        scheduler, input,  config,
         audio,  kabuki, qsound, soundboard, snow,      boards, system_tests,
-        ym2151, oki,
+        ym2151, oki,    state,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });
@@ -331,6 +342,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "audio", .module = audio },
             .{ .name = "input", .module = input },
             .{ .name = "config", .module = config },
+            .{ .name = "state", .module = state },
             .{ .name = "snow", .module = snow },
             .{ .name = "boards", .module = boards },
             .{ .name = "shell", .module = shell },
