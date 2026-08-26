@@ -68,16 +68,18 @@ jobs:
           restore-keys: |
             zig-${{ runner.os }}-${{ matrix.zig }}-
             zig-${{ runner.os }}-
-      # The QSound reference is the only thing this job fetches, and the only
-      # suite that skips itself when its data is missing (DESIGN.md §9 M4), so
-      # it runs ahead of `check`: a fetch that ran late would be a green build
-      # that tested less than it looks. The video milestones score against an
-      # acceptance ROM that is not fetched at all — test/system_test.zig
-      # assembles it. The other fetched tree, MAME's CPS-1 driver, has a job of
-      # its own below, because nothing in this one reads it.
-      - name: Fetch the QSound differential reference
+      # The two sound references are the only things this job fetches, and the
+      # only suites that skip themselves when their data is missing (DESIGN.md
+      # §9 M4, M9), so they run ahead of `check`: a fetch that ran late would be
+      # a green build that tested less than it looks. The video milestones score
+      # against an acceptance ROM that is not fetched at all —
+      # test/system_test.zig assembles it. The other fetched tree, MAME's CPS-1
+      # driver, has a job of its own below, because nothing in this one reads it.
+      - name: Fetch the differential sound references
         shell: bash
-        run: ./tools/fetch_qsound_reference.sh
+        run: |
+          ./tools/fetch_qsound_reference.sh
+          ./tools/fetch_opm_reference.sh
       - name: Compile check
         run: zig build check
       - name: Run tests

@@ -1256,16 +1256,27 @@ which is exactly why it is named here and fixed on its own.
   its hashes to freely distributable homebrew and a public-domain conformance
   ROM. Nothing equivalent exists for this machine, and §10's last rule forbids
   the alternative. So the regression seed is a ROM this project writes for
-  itself, with the CPS-1 SDK ([CCPS](https://fabiensanglard.net/ccps/)): our
-  source, our binary, our board file, all committed and all redistributable. It
-  exercises the layers, the object list, priority, the raster interrupt, the
-  palette copy, and a QSound command sequence, and it reports its own results on
-  screen so the harness can read them back as text rather than as pixels.
+  itself: our source, our binary, our board file, all in the tree and all
+  redistributable. It exercises the layers, the object list, priority, the
+  raster interrupt, the palette copy, and a QSound command sequence.
+  It was planned as a CCPS ([the CPS-1 SDK](https://fabiensanglard.net/ccps/))
+  project and built as fourteen 68000 instructions assembled by
+  `test/system_test.zig`, driven by a table of register writes with one entry
+  per scene and the scene chosen from the controls at reset. A toolchain nobody
+  has to install, a ROM image no build step has to produce, and the same
+  coverage. It reports itself the same way, without needing a font: the palette
+  puts the page number in each pixel's red nibble, so counting finished pixels
+  per page reads back as a row of numbers rather than as an image nobody can
+  diff by eye.
 - Hardware behaviour that no ROM reaches is unit-tested by building the state in
   memory — poke graphics RAM, render a line, hash it — the way zigesis tests the
   video modes its test ROMs never enter.
 - **What is measured against something outside this project, and what is not.**
-  The two CPUs are, and the DSP is: SingleStepTests upstream, qsound-hle at M4.
+  The two CPUs are, and both sound chips with a die behind them are:
+  SingleStepTests upstream, qsound-hle at M4, Nuked-OPM at M9. Both are fetched
+  into gitignored `testdata/` and both skip themselves when it is absent, so CI
+  fetches them before it builds — a differential that silently did not run is
+  worse than one that is not there.
   The video chip, the CPS-B configuration, the bus and the timing are not. The
   acceptance ROM's pinned scores and frame hashes are this project's renderer
   measured against this project's renderer, which catches a regression exactly
