@@ -59,3 +59,14 @@ test "a set is found under the name its zip is called, whatever its case" {
     try testing.expectEqual(find(some), find(std.ascii.upperString(shouted[0..some.len], some)));
     try testing.expectEqual(@as(?[]const u8, null), find("a set nobody ever made"));
 }
+
+test "a six-button set names the register its kicks are read from" {
+    // Buttons 4 to 6 are a CPS-B register a C-board decodes, and only the
+    // board file says which. A set that lost the line would boot, play, and
+    // never kick, which is a quiet enough failure to be worth pinning.
+    for ([_][]const u8{ "sf2", "sf2ce", "sf2hf" }) |name| {
+        var diag = board.Diag{};
+        const b = try board.parse(find(name).?, &diag);
+        try testing.expect(b.in2_offset != null);
+    }
+}
