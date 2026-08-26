@@ -35,11 +35,16 @@ pub const Request = union(enum) {
     reset,
     quit,
     screenshot,
+    /// Which slot, counted the way `state_slots` does.
+    save_state: usize,
+    load_state: usize,
 };
 
 const Page = enum {
     root,
     load,
+    save_state,
+    load_state,
     options,
     video,
     audio,
@@ -51,6 +56,10 @@ const Page = enum {
             .video, .audio, .keys => .options,
             else => .root,
         };
+    }
+
+    fn isSlots(p: Page) bool {
+        return p == .save_state or p == .load_state;
     }
 };
 
@@ -85,11 +94,11 @@ pub const Row = struct {
 
 pub const Tone = enum { plain, good, bad };
 
-/// Save and load state are not implemented yet; the menu gains their two rows
-/// with them.
 const root_items = [_]Item{
     .{ .label = "Resume", .act = .close },
     .{ .label = "Load Set", .act = .{ .goto = .load } },
+    .{ .label = "Save State", .act = .{ .goto = .save_state } },
+    .{ .label = "Load State", .act = .{ .goto = .load_state } },
     .{ .label = "Options", .act = .{ .goto = .options } },
     .{ .label = "Reset", .act = .reset },
     .{ .label = "Quit", .act = .quit },
@@ -129,6 +138,24 @@ const key_items = blk: {
 /// How much of a set's name the card's marquee holds.
 pub const max_card_title = 48;
 
+/// Save-state slots, of which the last one is the quicksave: the quick keys
+/// write there and nowhere else, so a quicksave can never land on top of a
+/// state somebody chose to keep, and `next_slot` walks the numbered ones only.
+pub const state_slots = 9;
+pub const quick_slot = state_slots - 1;
+
+/// Room for "Slot 9" and for "999d ago", which is as long as either gets.
+pub const max_slot_name = 8;
+pub const max_slot_age = 16;
+
+/// One row of the state list. The age is a string rather than a time because
+/// only `main.zig` can stat a file, and by the time the row is drawn the answer
+/// is already a reading.
+pub const Slot = struct {
+    age: [max_slot_age:0]u8 = @splat(0),
+    used: bool = false,
+};
+
 pub const Ui = struct {
     open: bool = false,
     paused: bool = false,
@@ -157,6 +184,18 @@ pub const Ui = struct {
     card_sub: [24:0]u8 = @splat(0),
     card: [card_rows]Row = @splat(.{}),
     card_n: usize = 0,
+    /// The state slots as they were last read off disk. `slots_stale` is how
+    /// `main.zig` is asked to read them again: statting nine files every frame
+    /// the menu is up would be nine syscalls for an answer that changes when
+    /// somebody saves.
+    slot: [state_slots]Slot = @splat(.{}),
+    slot_sel: usize = 0,
+    slots_stale: bool = true,
+    /// When the last quicksave of this session happened, on the frontend's own
+    /// clock, so the bar can show its age without asking the filesystem. Zero
+    /// until one is taken: a state left over from an earlier run has an age on
+    /// the menu's row and none on the bar.
+    quick_at: f64 = 0,
     browser: Browser = .{},
     path: [max_path:0]u8 = @splat(0),
     status_text: [96:0]u8 = @splat(0),
@@ -178,15 +217,70 @@ pub const Ui = struct {
             .video => &video_items,
             .audio => &audio_items,
             .keys => &key_items,
-            .load => &.{}, // the browser draws its own list
+            // The browser and the slot list draw their own.
+            .load, .save_state, .load_state => &.{},
         };
     }
 
     fn goto(ui: *Ui, page: Page) void {
         ui.page = page;
         ui.sel = 0;
+        if (page.isSlots()) ui.slots_stale = true;
+    }
+
+    /// Whether a set is in, as the menu can tell: the board card is built when
+    /// one loads and empty until then (§5.2), which is already what the bar
+    /// reads to choose between a name and NO SET.
+    fn hasSet(ui: *const Ui) bool {
+        return ui.card_n != 0;
     }
 };
+
+/// Rows that need a machine to act on. With no set in they are drawn dim and
+/// refuse, rather than disappearing: a menu whose rows move around depending on
+/// what is loaded is a menu nobody learns the shape of.
+fn needsSet(act: Act) bool {
+    return switch (act) {
+        .goto => |page| page.isSlots(),
+        else => false,
+    };
+}
+
+/// A slot's name on its row and in the status line. The quicksave is named
+/// rather than numbered, because which key wrote it is the only thing about it
+/// worth knowing.
+pub fn slotLabel(slot: usize, buf: []u8) [:0]const u8 {
+    if (slot == quick_slot) return "Quick";
+    return std.fmt.bufPrintZ(buf, "Slot {d}", .{slot + 1}) catch "Slot";
+}
+
+/// What `main.zig` found beside the set, as a row: an age, or nothing there.
+pub fn slotRow(ui: *Ui, slot: usize, age: ?[]const u8) void {
+    ui.slot[slot] = .{ .used = age != null };
+    if (age) |text| setText(ui.slot[slot].age[0..], text);
+}
+
+/// How long ago, in the largest unit that still leaves a number in front of
+/// it: a row says "3m ago", not 187 seconds and not "a while back".
+pub fn ago(buf: []u8, seconds: i64) []const u8 {
+    const s = @max(seconds, 0);
+    const units = [_]struct { per: i64, suffix: u8 }{
+        .{ .per = 1, .suffix = 's' },
+        .{ .per = std.time.s_per_min, .suffix = 'm' },
+        .{ .per = std.time.s_per_hour, .suffix = 'h' },
+        .{ .per = std.time.s_per_day, .suffix = 'd' },
+    };
+    var pick = units[0];
+    for (units) |unit| {
+        if (s >= unit.per) pick = unit;
+    }
+    return std.fmt.bufPrint(buf, "{d}{c} ago", .{ @divFloor(s, pick.per), pick.suffix }) catch "";
+}
+
+/// A quicksave just happened: the bar shows its age from here.
+pub fn quicksaved(ui: *Ui) void {
+    ui.quick_at = rl.GetTime();
+}
 
 // ---------------------------------------------------------------- update
 
@@ -243,6 +337,20 @@ fn hotkeys(ui: *Ui, cfg: *Config, has_set: bool) Request {
         return .none;
     }
     if (has_set and pressed(cfg, .screenshot)) return .screenshot;
+    // The numbered slots are what the slot key walks; the quicksave is reached
+    // by its own two keys and never by rotation.
+    if (pressed(cfg, .next_slot)) {
+        ui.slot_sel = (ui.slot_sel + 1) % quick_slot;
+        var buf: [max_slot_name]u8 = undefined;
+        ui.status("{s}", .{slotLabel(ui.slot_sel, &buf)});
+        return .none;
+    }
+    if (has_set) {
+        if (pressed(cfg, .save_state)) return .{ .save_state = ui.slot_sel };
+        if (pressed(cfg, .load_state)) return .{ .load_state = ui.slot_sel };
+        if (pressed(cfg, .quick_save)) return .{ .save_state = quick_slot };
+        if (pressed(cfg, .quick_load)) return .{ .load_state = quick_slot };
+    }
     if (pressed(cfg, .reset)) return .reset;
     // The idle screen asks for any key; the menu is what any key gets.
     if (!has_set and rl.GetKeyPressed() != 0) {
@@ -267,6 +375,7 @@ fn captureKey(ui: *Ui, cfg: *Config, action: Action) Request {
 
 fn menuKeys(ui: *Ui, cfg: *Config) Request {
     if (ui.page == .load) return browserKeys(ui);
+    if (ui.page.isSlots()) return slotKeys(ui);
 
     const items = ui.items();
     if (repeat(rl.KEY_DOWN)) ui.sel = (ui.sel + 1) % items.len;
@@ -284,6 +393,11 @@ fn menuKeys(ui: *Ui, cfg: *Config) Request {
     }
     const clicked = rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT) and mouseRow(items.len) != null;
     if (!rl.IsKeyPressed(rl.KEY_ENTER) and !clicked) return .none;
+
+    if (needsSet(items[ui.sel].act) and !ui.hasSet()) {
+        ui.status("load a set first", .{});
+        return .none;
+    }
 
     return switch (items[ui.sel].act) {
         .goto => |page| {
@@ -311,6 +425,32 @@ fn menuKeys(ui: *Ui, cfg: *Config) Request {
         // Enter on a value cycles it forward; left/right walk it either way.
         else => |act| adjust(ui, cfg, act, 1),
     };
+}
+
+/// The save and load pages are the same list of slots twice; which page it is
+/// decides what Enter does with the row.
+fn slotKeys(ui: *Ui) Request {
+    if (repeat(rl.KEY_DOWN)) ui.slot_sel = (ui.slot_sel + 1) % state_slots;
+    if (repeat(rl.KEY_UP)) ui.slot_sel = (ui.slot_sel + state_slots - 1) % state_slots;
+    if (hoveredRow(ui.slot_sel, state_slots)) |row| ui.slot_sel = row;
+
+    if (rl.IsKeyPressed(rl.KEY_ESCAPE)) {
+        ui.goto(.root);
+        return .none;
+    }
+    const clicked = rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT) and mouseRow(state_slots) != null;
+    if (!rl.IsKeyPressed(rl.KEY_ENTER) and !clicked) return .none;
+
+    const saving = ui.page == .save_state;
+    // Loading an empty slot is nothing at all, and a machine that quietly does
+    // not change is worse than being told why.
+    if (!saving and !ui.slot[ui.slot_sel].used) {
+        var buf: [max_slot_name]u8 = undefined;
+        ui.status("{s} is empty", .{slotLabel(ui.slot_sel, &buf)});
+        return .none;
+    }
+    ui.open = false;
+    return if (saving) .{ .save_state = ui.slot_sel } else .{ .load_state = ui.slot_sel };
 }
 
 fn adjust(ui: *Ui, cfg: *Config, act: Act, delta: i32) Request {
@@ -590,6 +730,8 @@ pub fn draw(ui: *const Ui, cfg: *const Config) void {
     const title = switch (ui.page) {
         .root => "zicps",
         .load => "Load Set - Enter opens a directory, Space loads it",
+        .save_state => "Save State",
+        .load_state => "Load State",
         .options => "Options",
         .video => "Video",
         .audio => "Audio",
@@ -598,6 +740,7 @@ pub fn draw(ui: *const Ui, cfg: *const Config) void {
     rl.DrawText(title, half(fs), half(fs), fs, dim);
 
     if (ui.page == .load) return drawBrowser(ui);
+    if (ui.page.isSlots()) return drawSlots(ui);
 
     var buf: [64]u8 = undefined;
     const items = ui.items();
@@ -607,7 +750,8 @@ pub fn draw(ui: *const Ui, cfg: *const Config) void {
         const y = topY() + rowHeight() * @as(c_int, @intCast(row));
         const selected = i == ui.sel;
         drawRow(y, selected);
-        rl.DrawText(item.label, fs, y, fs, if (selected) hilite else fg);
+        const off = needsSet(item.act) and !ui.hasSet();
+        rl.DrawText(item.label, fs, y, fs, if (off) dim else if (selected) hilite else fg);
 
         const value = valueText(item.act, cfg, ui, &buf) orelse continue;
         const color: rl.Color = switch (item.act) {
@@ -716,6 +860,24 @@ fn drawBrowser(ui: *const Ui) void {
     }
 }
 
+/// The slot list, for both saving and loading: the same nine rows either way,
+/// each carrying its age so a load knows which one it is reaching for.
+fn drawSlots(ui: *const Ui) void {
+    const fs = fontSize();
+    const first = firstVisible(ui.slot_sel, state_slots, visibleRows());
+    for (first..@min(state_slots, first + visibleRows()), 0..) |i, row| {
+        const y = topY() + rowHeight() * @as(c_int, @intCast(row));
+        const selected = i == ui.slot_sel;
+        drawRow(y, selected);
+        var buf: [max_slot_name]u8 = undefined;
+        rl.DrawText(slotLabel(i, &buf).ptr, fs, y, fs, if (selected) hilite else fg);
+
+        const value: [:0]const u8 = if (ui.slot[i].used) std.mem.sliceTo(&ui.slot[i].age, 0) else "empty";
+        const tone = if (!ui.slot[i].used) dim else if (selected) hilite else fg;
+        rl.DrawText(value.ptr, rl.GetScreenWidth() - fs - rl.MeasureText(value.ptr, fs), y, fs, tone);
+    }
+}
+
 // ------------------------------------------------------------------- bar
 
 /// The strip along the bottom of the window: the control panel as the board
@@ -807,8 +969,8 @@ fn drawBar(ui: *const Ui, cfg: *const Config) void {
 
     const right = drawBarRight(ui, cfg, w - gap, floor, ty, fs);
 
-    const name: [:0]const u8 = if (ui.card_n == 0) "NO SET" else std.mem.sliceTo(&ui.card_title, 0);
-    drawName(name, name_x, right - name_x, ty, fs, if (ui.card_n == 0) dim else marquee_ink);
+    const name: [:0]const u8 = if (!ui.hasSet()) "NO SET" else std.mem.sliceTo(&ui.card_title, 0);
+    drawName(name, name_x, right - name_x, ty, fs, if (!ui.hasSet()) dim else marquee_ink);
 }
 
 /// The state readouts, laid out right to left from `right` because everything
@@ -823,6 +985,17 @@ fn drawBarRight(ui: *const Ui, cfg: *const Config, right: c_int, floor: c_int, t
         at = barField(at, ty, fs, fps, fps_field, dim);
     } else |_| {}
     if (!cfg.audio or cfg.volume == 0) at = barIcon(at, ty, fs, .mute, bad);
+
+    // Nothing until there has been a quicksave this session, and from then on
+    // a field rather than shrink-wrapped text, for the reason `fps_field` is
+    // one: the reading grows a digit as it ages and the name must not move.
+    if (ui.quick_at > 0) {
+        var since: [16]u8 = undefined;
+        const seconds: i64 = @intFromFloat(rl.GetTime() - ui.quick_at);
+        if (std.fmt.bufPrintZ(&buf, "QS {s}", .{ago(&since, seconds)})) |text| {
+            at = barField(at, ty, fs, text, quick_field, dim);
+        } else |_| {}
+    }
 
     var key: [key_hint_buf]u8 = undefined;
     const fast_key = keyHint(cfg, .fast_forward, &key);
@@ -884,6 +1057,9 @@ fn marqueeOffset(t: f64, span: c_int, fs: c_int) c_int {
 /// frame, and a title whose width sits near where its box ends up otherwise
 /// flips between scrolling and standing still several times a second.
 const fps_field = "9999 FPS";
+
+/// The same trick for the quicksave age, which grows a digit as it ages.
+const quick_field = "QS 999m ago";
 
 /// Draws one right-aligned item and hands back the left edge for the next.
 fn barText(x: c_int, y: c_int, fs: c_int, text: [:0]const u8, color: rl.Color) c_int {
@@ -1288,6 +1464,53 @@ test "a long title scrolls a loop and starts over" {
     }
 }
 
+test "the state rows are the ones that go dim with no set in" {
+    var ui = Ui{};
+    try std.testing.expect(!ui.hasSet());
+
+    var gated: usize = 0;
+    for (root_items) |item| {
+        if (needsSet(item.act)) gated += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 2), gated); // Save State and Load State
+
+    // And the same rows are live again the moment a card exists, which is what
+    // `main.zig` builds when a set goes in.
+    cardStart(&ui, "ffight.zip", "boards/ffight.board");
+    cardRow(&ui, "CPU", .plain, "68000", .{});
+    try std.testing.expect(ui.hasSet());
+}
+
+test "a slot is named, aged, and cycled without ever landing on the quicksave" {
+    var buf: [max_slot_age]u8 = undefined;
+    try std.testing.expectEqualStrings("Slot 1", slotLabel(0, &buf));
+    try std.testing.expectEqualStrings("Quick", slotLabel(quick_slot, &buf));
+
+    try std.testing.expectEqualStrings("0s ago", ago(&buf, 0));
+    try std.testing.expectEqualStrings("59s ago", ago(&buf, 59));
+    try std.testing.expectEqualStrings("3m ago", ago(&buf, 187));
+    try std.testing.expectEqualStrings("2h ago", ago(&buf, 2 * std.time.s_per_hour + 61));
+    try std.testing.expectEqualStrings("9d ago", ago(&buf, 9 * std.time.s_per_day));
+    // A clock that ran backwards is a reading of zero, not a negative age.
+    try std.testing.expectEqualStrings("0s ago", ago(&buf, -5));
+    // The widest reading the bar reserves room for still fits its field.
+    try std.testing.expect(ago(&buf, 999 * std.time.s_per_min).len <= quick_field.len - 3);
+
+    var ui = Ui{};
+    slotRow(&ui, 2, "4m ago");
+    try std.testing.expect(ui.slot[2].used);
+    try std.testing.expectEqualStrings("4m ago", std.mem.sliceTo(&ui.slot[2].age, 0));
+    slotRow(&ui, 2, null);
+    try std.testing.expect(!ui.slot[2].used);
+
+    // Cycling the selection walks the numbered slots and wraps before the
+    // quicksave, so F6 can never land on one the user put there by hand.
+    for (0..state_slots * 2) |_| {
+        ui.slot_sel = (ui.slot_sel + 1) % quick_slot;
+        try std.testing.expect(ui.slot_sel != quick_slot);
+    }
+}
+
 test "every action has a row on the keys page, and every page has rows" {
     var ui = Ui{ .page = .keys };
     try std.testing.expectEqual(input.Action.count + 1, ui.items().len);
@@ -1296,6 +1519,7 @@ test "every action has a row on the keys page, and every page has rows" {
     }
     inline for (@typeInfo(Page).@"enum".fields) |field| {
         ui.page = @enumFromInt(field.value);
-        try std.testing.expect(ui.items().len > 0 or ui.page == .load);
+        // The browser and the slot list are the two that draw their own rows.
+        try std.testing.expect(ui.items().len > 0 or ui.page == .load or ui.page.isSlots());
     }
 }

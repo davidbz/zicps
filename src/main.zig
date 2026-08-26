@@ -16,6 +16,7 @@ const video = @import("video");
 const audio = @import("audio");
 const input = @import("input");
 const config = @import("config");
+const state = @import("state");
 const snow = @import("snow");
 const boards = @import("boards");
 const shell = @import("shell");
@@ -461,6 +462,70 @@ fn flushNv(io: std.Io, c: *cps.Cps, set: []const u8) !void {
     c.eeprom.dirty = false;
 }
 
+// -------------------------------------------------------------- save states
+
+/// `game.zip.st3` beside the set, the extension added rather than replaced for
+/// the same reason `nvPath` adds it. The quicksave is lettered rather than
+/// numbered, so the key that writes it can never land on a slot the user
+/// filled by hand.
+fn statePath(buf: []u8, set: []const u8, slot: usize) ![]const u8 {
+    if (slot == shell.quick_slot) return std.fmt.bufPrint(buf, "{s}.stq", .{set});
+    return std.fmt.bufPrint(buf, "{s}.st{d}", .{ set, slot + 1 });
+}
+
+fn saveState(w: *Window, slot: usize) void {
+    var path_buf: [shell.max_path]u8 = undefined;
+    const path = statePath(&path_buf, w.set, slot) catch return;
+    // A state is the machine's own size, which is far more than a stack frame.
+    const buf = w.gpa.create([state.bytes]u8) catch |err| return w.ui.status("{t}", .{err});
+    defer w.gpa.destroy(buf);
+
+    state.save(w.c, w.cpu, buf);
+    std.Io.Dir.cwd().writeFile(w.io, .{ .sub_path = path, .data = buf }) catch |err| {
+        return w.ui.status("cannot write {s}: {t}", .{ path, err });
+    };
+
+    var name: [shell.max_slot_name]u8 = undefined;
+    w.ui.status("saved {s}", .{shell.slotLabel(slot, &name)});
+    if (slot == shell.quick_slot) shell.quicksaved(&w.ui);
+    w.ui.slots_stale = true;
+}
+
+fn loadState(w: *Window, slot: usize) void {
+    var path_buf: [shell.max_path]u8 = undefined;
+    const path = statePath(&path_buf, w.set, slot) catch return;
+    var name: [shell.max_slot_name]u8 = undefined;
+    const slot_name = shell.slotLabel(slot, &name);
+
+    const buf = std.Io.Dir.cwd().readFileAlloc(w.io, path, w.gpa, state.limit) catch |err| {
+        return w.ui.status("{s}: {t}", .{ slot_name, err });
+    };
+    defer w.gpa.free(buf);
+    // A state from another build is refused here rather than loaded as
+    // garbage, and the machine that was running is still running.
+    state.load(w.c, w.cpu, buf) catch |err| return w.ui.status("{s}: {t}", .{ slot_name, err });
+    w.ui.status("loaded {s}", .{slot_name});
+}
+
+/// The ages the slot list reads out. Statted when the page opens and when a
+/// state is written, not every frame: nine syscalls a frame for a list that
+/// changes twice a session is the kind of thing a profile finds later.
+fn refreshSlots(w: *Window) void {
+    if (!w.ui.slots_stale) return;
+    w.ui.slots_stale = false;
+    const now = std.Io.Timestamp.now(w.io, .real).toSeconds();
+    for (0..shell.state_slots) |slot| {
+        var path_buf: [shell.max_path]u8 = undefined;
+        var age_buf: [shell.max_slot_age]u8 = undefined;
+        const path = statePath(&path_buf, w.set, slot) catch continue;
+        const stat = std.Io.Dir.cwd().statFile(w.io, path, .{}) catch {
+            shell.slotRow(&w.ui, slot, null);
+            continue;
+        };
+        shell.slotRow(&w.ui, slot, shell.ago(&age_buf, now - stat.mtime.toSeconds()));
+    }
+}
+
 /// Holds a path that outlives the `Request.load` slice it was copied from,
 /// which points into the shell's own buffer.
 fn keepPath(buf: []u8, path: []const u8) []const u8 {
@@ -700,6 +765,7 @@ fn windowed(
 
     while (!rl.WindowShouldClose() and !w.quit and !cpu.halted) {
         try serveRequest(&w);
+        refreshSlots(&w);
         applyOptions(&w);
         const running = try stepFrames(&w);
         paceDrawing(&w, running);
@@ -733,6 +799,11 @@ fn serveRequest(w: *Window) !void {
             w.frames = 0;
         },
         .load => |p| loadIntoWindow(w, p),
+        // Gated on a set being in the way `.reset` is: with no machine there is
+        // nothing to write down, and `w.set` is the empty string, so a state
+        // would land on a file named after nothing.
+        .save_state => |slot| if (w.machine.* != null) saveState(w, slot),
+        .load_state => |slot| if (w.machine.* != null) loadState(w, slot),
         // Numbered by frame, so holding the key down never overwrites the shot
         // before it and the order they were taken in is the order they sort in.
         .screenshot => if (w.machine.* != null) {

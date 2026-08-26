@@ -1011,6 +1011,52 @@ Acceptance: the round trip is bit-identical under the replay harness — save, r
 N frames hashing every pixel and every sample, load, run the same N frames,
 identical hashes — and a state from another build is refused rather than loaded.
 
+**Ceilings left behind.**
+
+- **The header knows which build wrote a state, not which set.** The comptime
+  layout hash catches a machine that changed shape, which is what §8.3 asked
+  for; nothing in the file says which game was in. The ROM slices are reattached
+  from whatever machine is loaded (§3.2), so a `dino` state read into `sf2`
+  would run `dino`'s RAM against `sf2`'s ROMs and produce garbage rather than a
+  refusal. What actually prevents that is the path: slots are files beside the
+  set, `game.zip.st3` and `game.zip.stq`, so a state is only ever offered for
+  the set it was taken from. Copying one by hand defeats it. A set fingerprint
+  in the header — the program ROMs' sum §5.2 already computes — is the fix, and
+  it is one field whenever it is worth a version bump.
+- **768 KiB a slot, uncompressed.** A state is `@sizeOf(Cps)` plus the 68000's
+  88 bytes plus a 24-byte header, and the machine is almost entirely graphics
+  RAM and framebuffer. Nine slots per set is about 6.7 MB on disk. That is the
+  price of the memcpy having no serializer in it, and it buys the property that
+  no field can be forgotten. Compression would be one call around the two
+  `@memcpy`s if it ever matters.
+- **A row's age is read when the page opens, not while it is open.** Nine stats
+  a frame for a list that changes twice a session is not worth the syscalls, so
+  `main.zig` re-reads them on entry to the page and after a write. A row that
+  said "3m ago" keeps saying so while it is looked at. A timer would fix it and
+  nothing here needs one yet.
+- **The bar's quicksave age is this session's.** It ticks off raylib's clock
+  from the last quicksave *this run*, so a fresh window says nothing about the
+  quicksave still sitting on disk from yesterday, even though the Load State
+  page reads that one's real age off the file. The bar field was specified as
+  the age of the thing the user just did, and that is what it is.
+- **No rewind, no autosave, no undoing a load.** Loading throws the running
+  machine away, including a position nobody saved. zigesis's rewind ring is the
+  shape this grows into and it is a different feature: it needs the state to be
+  cheap to take many times a second, which is the same 768 KiB problem above.
+- **A load rewinds the EEPROM too, and the sidecar follows it.** The battery is
+  a field of the machine (§3.2), so it is in the copy like everything else, and
+  the next flush writes the rewound contents out to `game.zip.nv`. That is the
+  consistent reading — a state is the whole machine at an instant — but it means
+  a load can undo a change made in the board's own service menu. MAME keeps NVRAM
+  out of its states for exactly this reason; keeping it in is the choice §8.3's
+  "a straight copy of the machine's bytes" makes, and reversing it would mean
+  the first per-field exception in a design built to have none.
+- **Nine slots, unnamed, no thumbnails.** The last one is the quicksave, which
+  is why `next_slot` walks eight, and a row carries a label and an age and
+  nothing else. A screenshot beside each state is what would make a slot list
+  worth browsing rather than counting, and §5.2's card is where that work would
+  land.
+
 ### M7: Compatibility and polish
 
 Deliverables: a sweep over whatever sets are present, in the shape of zigesis's
