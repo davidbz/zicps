@@ -27,6 +27,12 @@ gfx = 0x200002 0x080000 word64 rt-8m.10a crc=0x1f055014
 gfx = 0x200004 0x080000 word64 rt-2m.4a crc=0xe9a034f4
 gfx = 0x200006 0x080000 word64 rt-4m.6a crc=0xdf0eea8b
 
+audio = 0x000000 0x008000 byte   rt_9.12b crc=0xabfca165
+audio = 0x010000 0x008000 byte   rt_9.12b 0x8000 crc=0xabfca165
+
+oki = 0x000000 0x020000 byte   rt_18.11c crc=0x26b211ab
+oki = 0x020000 0x020000 byte   rt_19.12c crc=0xdbe64ad0
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x28
 priority        = 0x26 0x24 0x22 0x20

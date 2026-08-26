@@ -31,6 +31,12 @@ gfx = 0x100005 0x020000 byte64 xmqq-7c.bin crc=0xd91cda18
 gfx = 0x100006 0x020000 byte64 xmqq-9h.bin crc=0x3cd8594b
 gfx = 0x100007 0x020000 byte64 xmqq-9f.bin crc=0x1ec10bed
 
+audio = 0x000000 0x008000 byte   xmqq-13b.bin crc=0x4e8b81a8
+audio = 0x010000 0x008000 byte   xmqq-13b.bin 0x8000 crc=0x4e8b81a8
+
+oki = 0x000000 0x020000 byte   xmqq-12c.bin crc=0x71ac69ad
+oki = 0x020000 0x020000 byte   xmqq-13c.bin crc=0x71e29699
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

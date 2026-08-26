@@ -31,6 +31,12 @@ gfx = 0x600002 0x080000 word64 sfz_15.8c crc=0x1aa17391
 gfx = 0x600004 0x080000 word64 sfz_16.9c crc=0x19a5abd6
 gfx = 0x600006 0x080000 word64 sfz_17.10c crc=0x248b3b73
 
+audio = 0x000000 0x008000 byte   sfz_09.12a crc=0xc772628b
+audio = 0x010000 0x008000 byte   sfz_09.12a 0x8000 crc=0xc772628b
+
+oki = 0x000000 0x020000 byte   sfz_18.11c crc=0x61022b2d
+oki = 0x020000 0x020000 byte   sfz_19.12c crc=0x3b5886d5
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

@@ -20,6 +20,11 @@ gfx = 0x000002 0x080000 word64 ar-7m.9a crc=0xa02945f4
 gfx = 0x000004 0x080000 word64 ar-1m.3a crc=0x5965ca8d
 gfx = 0x000006 0x080000 word64 ar-3m.5a crc=0xac6db17d
 
+audio = 0x000000 0x008000 byte   ar_09.12b crc=0xf3dd1367
+audio = 0x010000 0x008000 byte   ar_09.12b 0x8000 crc=0xf3dd1367
+
+oki = 0x000000 0x020000 byte   aru_18.11c crc=0x584b43a9
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

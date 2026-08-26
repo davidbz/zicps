@@ -43,6 +43,12 @@ gfx = 0x400005 0x040000 byte64 2.a4 crc=0x144aa4c9
 gfx = 0x400006 0x040000 byte64 4.a6 crc=0xf2c400b4
 gfx = 0x400007 0x040000 byte64 3.a5 crc=0x8053335d
 
+audio = 0x000000 0x008000 byte   snd.9.b13 crc=0x08f6b60e
+audio = 0x010000 0x008000 byte   snd.9.b13 0x8000 crc=0x08f6b60e
+
+oki = 0x000000 0x020000 byte   9k.18.c11 crc=0x7f162009
+oki = 0x020000 0x020000 byte   lk.19.c13 crc=0xbeade53f
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

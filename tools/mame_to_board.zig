@@ -512,8 +512,8 @@ const Mame = struct {
         var loads: std.ArrayList(Load) = .empty;
         var region: ?board.Region = null;
         // What this build cannot express, remembered per region rather than
-        // refused on sight: most of it is in the sound ROM of a CPS-1 set,
-        // whose lines are dropped anyway.
+        // refused on sight, so a set is only turned away for a region it
+        // actually has.
         var beyond: [board.region_count]?[]const u8 = @splat(null);
         var lines = std.mem.splitScalar(u8, block, '\n');
         while (lines.next()) |raw| {
@@ -524,8 +524,8 @@ const Mame = struct {
                 region = regionOf(unquote((try fields(m.arena, parens(line, 0) orelse continue))[1]));
                 continue;
             }
-            // A PLD region, or the samples of a sound board this build does
-            // not have: whatever it does in there is not ours to express.
+            // A PLD region, or the star field, or a patch: whatever it does
+            // in there is not ours to express.
             const into = region orelse continue;
             const args = try fields(m.arena, parens(line, 0) orelse continue);
 
@@ -547,6 +547,13 @@ const Mame = struct {
                     .src = prev.src + prev.len,
                     .crc = prev.crc,
                 });
+                continue;
+            }
+
+            if (std.mem.eql(u8, macro, "ROM_IGNORE")) {
+                // The rest of a chip that is not loaded at all: a board file
+                // says where each piece comes from, so a piece nobody reads is
+                // a line nobody writes.
                 continue;
             }
 
@@ -573,17 +580,7 @@ const Mame = struct {
             });
         }
 
-        // A CPS-1 sound board is a YM2151 and an OKI, which this build
-        // does not emulate: without a QSound chip beside it, the Z80 has
-        // nothing this build can play, and a set with no sound ROM at all is
-        // a path the loader already has.
-        var quiet = true;
-        for (loads.items) |load| {
-            if (load.region == .qsound) quiet = false;
-        }
-
         for (std.enums.values(board.Region)) |into| {
-            if (quiet and (into == .audio or into == .qsound)) continue;
             if (beyond[@intFromEnum(into)]) |reason|
                 return m.give("{s} ({s} ROM)", .{ reason, @tagName(into) });
             var first = true;
@@ -617,6 +614,7 @@ const Mame = struct {
                 .gfx => romset.max_gfx,
                 .audio => romset.max_audio,
                 .qsound => romset.max_qsound,
+                .oki => romset.max_oki,
             };
             if (size > max)
                 return m.give("0x{x} bytes of {s} ROM, and no board holds more than 0x{x}", .{ size, @tagName(region), max });
@@ -645,6 +643,7 @@ fn regionOf(tag: []const u8) ?board.Region {
     if (std.mem.eql(u8, tag, "gfx")) return .gfx;
     if (std.mem.eql(u8, tag, "audiocpu")) return .audio;
     if (std.mem.eql(u8, tag, "qsound")) return .qsound;
+    if (std.mem.eql(u8, tag, "oki")) return .oki;
     return null;
 }
 

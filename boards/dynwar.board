@@ -24,6 +24,12 @@ gfx = 0x200002 0x080000 word64 tkm-4.10a crc=0xa54c515d
 gfx = 0x200004 0x080000 word64 tkm-2.4a crc=0xca5c687c
 gfx = 0x200006 0x080000 word64 tkm-3.6a crc=0xf9fe6591
 
+audio = 0x000000 0x008000 byte   tke_17.12b crc=0xb3b79d4f
+audio = 0x010000 0x008000 byte   tke_17.12b 0x8000 crc=0xb3b79d4f
+
+oki = 0x000000 0x020000 byte   tke_18.11c crc=0xac6e307d
+oki = 0x020000 0x020000 byte   tke_19.12c crc=0x068741db
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x2c
 priority        = 0x2a 0x28 0x26 0x24

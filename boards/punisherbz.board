@@ -23,6 +23,12 @@ gfx = 0x200002 0x080000 word64 ps_gfx7.rom crc=0x04c5acbd
 gfx = 0x200004 0x080000 word64 ps_gfx6.rom crc=0xa544f4cc
 gfx = 0x200006 0x080000 word64 ps_gfx8.rom crc=0x8f02f436
 
+audio = 0x000000 0x008000 byte   9.512 crc=0xb8367eb5
+audio = 0x010000 0x008000 byte   9.512 0x8000 crc=0xb8367eb5
+
+oki = 0x000000 0x020000 byte   18.010 crc=0x375c66e7
+oki = 0x020000 0x020000 byte   19.010 crc=0xeb5ca884
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

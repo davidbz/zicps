@@ -39,6 +39,13 @@ pub const cps_a_lo = 0x800100;
 pub const cps_a_hi = 0x80013f;
 pub const cps_b_lo = 0x800140;
 pub const cps_b_hi = 0x80017f;
+/// The two command latches of a plain CPS-1 board (§7.5). A QSound board has
+/// shared RAM instead and never touches these; this board has no shared RAM at
+/// all, and a byte posted here is the whole of what the 68000 tells the Z80.
+pub const latch0_lo = 0x800180;
+pub const latch0_hi = 0x800187;
+pub const latch1_lo = 0x800188;
+pub const latch1_hi = 0x80018f;
 pub const gfxram_lo = 0x900000;
 pub const gfxram_hi = 0x92ffff;
 pub const audio_peek_lo = 0xf00000;
@@ -115,10 +122,19 @@ const in1_player_bits = 7;
 const in2_button_shift = @intFromEnum(Button.b4);
 
 /// The IN0 window holds four byte-wide registers a word apart: the system
-/// inputs, then the three DIP banks. A QSound board carries none of the banks.
+/// inputs, then the three DIP banks.
 const dsw_slots = 4;
 const in0_slot = 0;
+/// A QSound board has no DIP switches at all — its settings live in the
+/// service menu — and the pins float high.
 const dsw_absent = 0xff;
+
+/// Where the three banks are left, since nothing here can turn them. All
+/// switches off, except the one in bank C that decides whether the attract
+/// mode is heard: `demo_sounds` is the odd switch that reads zero when it is
+/// on, and off it would leave every game in the library silent until a coin.
+const demo_sounds = 0x20;
+const dsw_setting = [dsw_slots - 1]u8{ 0xff, 0xff, 0xff & ~@as(u8, demo_sounds) };
 
 pub const Inputs = struct {
     pad: [2]u16 = @splat(0),
@@ -314,10 +330,20 @@ pub const Cps = struct {
     /// to the next line rather than forgiven.
     cpu_over: u64 = 0,
     sound_over: u64 = 0,
-    /// Reference ticks owed to the Z80's periodic interrupt and to the QSound
-    /// chip's sample clock, carried the same way the CPUs carry cycles.
+    /// Reference ticks owed to the Z80's periodic interrupt and to the sound
+    /// chip's sample clock, carried the same way the CPUs carry cycles. Which
+    /// clock `sample_debt` counts is the board's: the QSound chip's, or the
+    /// OPM's.
     sound_irq_debt: u64 = 0,
     sample_debt: u64 = 0,
+    /// A CPS-1 board's Z80 does not divide the reference evenly either, so its
+    /// cycles are owed rather than budgeted, and the M6295 keeps a debt of its
+    /// own because it is the one chip here on a crystal nothing else shares.
+    sound_debt: u64 = 0,
+    oki_debt: u64 = 0,
+    /// The last sample the M6295 finished, held until it finishes another: it
+    /// runs at a seventh of the OPM's rate and the mix happens at the OPM's.
+    oki_out: i16 = 0,
 
     // The 68000 core reaches its bus by method call. The functions stay free.
     pub const read8 = file.read8;
@@ -332,7 +358,7 @@ pub fn read16(c: *Cps, addr: u24) u16 {
     return switch (addr) {
         program_lo...program_hi => peek(c.rom.program, addr - program_lo),
         in1_lo...in1_hi => in1(c),
-        in0_lo...in0_hi => highByteWide(if (slot(addr) == in0_slot) in0(c) else dsw_absent),
+        in0_lo...in0_hi => highByteWide(if (slot(addr) == in0_slot) in0(c) else dsw(c, slot(addr))),
         cps_a_lo...cps_a_hi => video.readA(&c.v, @truncate(addr - cps_a_lo)),
         cps_b_lo...cps_b_hi => video.readB(&c.v, &c.board, @truncate(addr - cps_b_lo)),
         gfxram_lo...gfxram_hi => peek(&c.v.gfxram, addr - gfxram_lo),
@@ -398,6 +424,11 @@ fn in2(c: *const Cps) u16 {
     return ~(low | high << 4);
 }
 
+/// The DIP banks, which only a plain CPS-1 board carries.
+fn dsw(c: *const Cps, which: u24) u8 {
+    if (c.board.sound() != .cps1) return dsw_absent;
+    return dsw_setting[which - 1];
+}
 fn in0(c: *const Cps) u8 {
     var bits: u8 = 0;
     for (in0_bit, 0..) |bit, i| {
@@ -429,6 +460,14 @@ fn poke(c: *Cps, addr: u24, value: u16, mask: u16) void {
         coinctrl_lo...coinctrl_hi => merge(&c.coin_control, value, mask),
         cps_a_lo...cps_a_hi => video.writeA(&c.v, &c.board, @truncate(addr - cps_a_lo), value, mask),
         cps_b_lo...cps_b_hi => video.writeB(&c.v, &c.board, @truncate(addr - cps_b_lo), value, mask),
+        // The first latch takes whichever lane the CPU drove — a driver posts
+        // it with a byte write as often as a word one. The second is wired to
+        // the low lane only.
+        latch0_lo...latch0_hi => soundboard.post(&c.sound, 0, if (mask & low_lane != 0)
+            @truncate(value)
+        else
+            @truncate(value >> 8)),
+        latch1_lo...latch1_hi => if (mask & low_lane != 0) soundboard.post(&c.sound, 1, @truncate(value)),
         gfxram_lo...gfxram_hi => pokeBytes(&c.v.gfxram, addr - gfxram_lo, value, mask),
         // Byte-wide, and only the low lane is wired, so an even-address byte
         // write reaches nothing at all.
@@ -464,7 +503,7 @@ const testing = std.testing;
 
 /// A machine with no ROMs, for exercising the parts of the map that are RAM.
 fn bare() Cps {
-    return .{ .board = .{}, .rom = .{ .program = &.{}, .gfx = &.{}, .audio = &.{}, .qsound = &.{} } };
+    return .{ .board = .{}, .rom = .{ .program = &.{}, .gfx = &.{}, .audio = &.{}, .qsound = &.{}, .oki = &.{} } };
 }
 
 test "work RAM and graphics RAM answer bytes and words alike" {
@@ -522,6 +561,16 @@ test "controls are wired to ground, so a pressed button reads as a zero" {
     try testing.expectEqual(@as(u16, 0xffff), read16(&c, in0_lo + 2));
 }
 
+test "a plain CPS-1 board has DIP switches, and the demo sounds one is on" {
+    var c = bare();
+    c.board.roms[0] = .{ .region = .oki, .dest = 0, .len = 0, .mode = .byte, .src = 0, .name = "" };
+    c.board.rom_count = 1;
+    // Banks A and B as they leave the factory, and bank C with the one switch
+    // that decides whether an uncoined machine is heard.
+    try testing.expectEqual(@as(u16, 0xffff), read16(&c, in0_lo + 2));
+    try testing.expectEqual(@as(u16, 0xffff), read16(&c, in0_lo + 4));
+    try testing.expectEqual(@as(u16, 0xdfff), read16(&c, in0_lo + 6));
+}
 /// Clocks one bit into the EEPROM the way a driver does: set the wire, raise
 /// the clock, drop it. Chip select stays asserted throughout.
 fn eepromBit(c: *Cps, bit: u1) void {

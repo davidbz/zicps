@@ -20,6 +20,12 @@ gfx = 0x200002 0x080000 word64 gbpj_06.8a crc=0x1be8fd86
 gfx = 0x200004 0x080000 word64 gbpj_07.9a crc=0xdeb8ef02
 gfx = 0x200006 0x080000 word64 gbpj_08.10a crc=0x9f90359d
 
+audio = 0x000000 0x008000 byte   gbpj_09.12a crc=0xfc431024
+audio = 0x010000 0x008000 byte   gbpj_09.12a 0x8000 crc=0xfc431024
+
+oki = 0x000000 0x020000 byte   gbpj_18.11c crc=0xcc54778d
+oki = 0x020000 0x020000 byte   gbpj_19.12c crc=0xea8b56d8
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

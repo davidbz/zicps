@@ -11,19 +11,27 @@
 //! The fixed half of the ROM arrives encrypted and is decoded once at load
 //! into two buffers, one for opcode fetches and one for data reads
 //! (`kabuki.zig`). The banked half is not encrypted at all.
+//!
+//! Two boards, one file (§7.5). A plain CPS-1 board is the same Z80, the same
+//! bank window and the same ROM views; only the map above them differs — two
+//! chips and two command latches instead of the shared RAM and the DL-1425. So
+//! the difference is a tag and a branch in the bus switch that is already here,
+//! not a second module.
 
 const std = @import("std");
 const board = @import("board");
 const kabuki = @import("kabuki");
+const oki = @import("oki");
 const qsound = @import("qsound");
+const ym2151 = @import("ym2151");
 const z80 = @import("z80");
 
 const file = @This();
 
 pub const Core = z80.Core(SoundBoard);
 
-/// The Z80's map. The fixed ROM and the bank window are the two halves of the
-/// audio region; everything above them is RAM and chips.
+/// The Z80's map on a QSound board. The fixed ROM and the bank window are the
+/// two halves of the audio region; everything above them is RAM and chips.
 pub const fixed_lo = 0x0000;
 pub const fixed_hi = 0x7fff;
 pub const bank_lo = 0x8000;
@@ -43,6 +51,22 @@ pub const shared_bytes = shared0_hi - shared0_lo + 1;
 /// Two separate RAMs, each of which both CPUs reach at an address of its own.
 pub const shared_windows = 2;
 
+/// The same map on a plain CPS-1 board: below 0xc000 it is the same ROM and
+/// the same bank window, and above it there is no shared RAM at all — a work
+/// RAM of its own, the two chips, and the two latches the 68000 posts into.
+pub const work_lo = 0xd000;
+pub const work_hi = 0xd7ff;
+pub const ym_lo = 0xf000;
+pub const ym_hi = 0xf001;
+pub const oki_port = 0xf002;
+pub const cps1_banksw = 0xf004;
+pub const oki_pin7 = 0xf006;
+pub const latch0 = 0xf008;
+pub const latch1 = 0xf00a;
+
+/// The two latches, in the order the Z80 reads them back.
+pub const latches = 2;
+
 /// Where the banked half of the audio region starts. The fixed half is a whole
 /// 64 KiB slot wide even though only half of it is ROM, which is why a board
 /// file's second `audio` line lands here and not at 0x8000.
@@ -53,8 +77,17 @@ pub const bank_base = 0x10000;
 pub const blank = 0xff;
 
 pub const SoundBoard = struct {
+    /// Which board this is, and so which map the bus switch takes.
+    kind: board.Sound = .qsound,
+
     cpu: z80.Cpu = .{},
     q: qsound.Qsound = .{},
+    ym: ym2151.Ym2151 = .{},
+    m6295: oki.Oki = .{},
+
+    /// What the 68000 last posted, which on this board is the whole of the
+    /// conversation between the two CPUs.
+    latch: [latches]u8 = @splat(0),
 
     /// The fixed ROM as the CPU sees it, once each way. Decoding at load costs
     /// 64 KiB of machine state and buys a bus read that is one index.
@@ -64,7 +97,9 @@ pub const SoundBoard = struct {
     /// heap slices: reattached after a save state rather than copied into it.
     rom: []const u8 = &.{},
 
-    /// The Z80's RAM, and the 68000's window on it.
+    /// The Z80's RAM, and the 68000's window on it. A CPS-1 board's 2 KiB of
+    /// work RAM is the front of the first window: the 68000 cannot see it, but
+    /// it is the same chip in the same place and it saves a second array.
     shared: [shared_windows][shared_bytes]u8 = @splat(@splat(0)),
 
     bank: u4 = 0,
@@ -97,9 +132,13 @@ pub const SoundBoard = struct {
 /// bank window, and hands the chip the sample ROM it plays out of. A board with
 /// no Kabuki key — the set this project builds for itself — reads the same
 /// bytes both ways.
-pub fn load(s: *SoundBoard, rom: []const u8, samples: []const u8, key: ?board.Kabuki) void {
+pub fn load(s: *SoundBoard, kind: board.Sound, rom: []const u8, samples: []const u8, key: ?board.Kabuki) void {
+    s.kind = kind;
     s.rom = rom;
-    qsound.attach(&s.q, samples);
+    switch (kind) {
+        .cps1 => oki.attach(&s.m6295, samples),
+        else => qsound.attach(&s.q, samples),
+    }
     const fixed = rom[0..@min(rom.len, fixed_bytes)];
     @memset(&s.op, blank);
     @memset(&s.data, blank);
@@ -121,8 +160,14 @@ pub fn step(s: *SoundBoard) void {
 }
 
 /// Offers the pending interrupt at an instruction boundary. Level-triggered:
-/// a driver running with interrupts off keeps it until it lets it in.
+/// a driver running with interrupts off keeps it until it lets it in. On a
+/// CPS-1 board the level is the OPM's own timer flag and stays up until the
+/// handler clears it at the chip, so there is nothing here to take down.
 pub fn interrupt(s: *SoundBoard) void {
+    if (s.kind == .cps1) {
+        if (ym2151.irq(&s.ym)) _ = Core.interrupt(&s.cpu, s, .{ .int = true });
+        return;
+    }
     if (s.int_pending and Core.interrupt(&s.cpu, s, .{ .int = true })) s.int_pending = false;
 }
 
@@ -131,7 +176,16 @@ pub fn reset(s: *SoundBoard) void {
     Core.reset(&s.cpu);
     s.bank = 0;
     s.int_pending = false;
+    s.latch = @splat(0);
     qsound.reset(&s.q);
+    ym2151.reset(&s.ym);
+    oki.reset(&s.m6295);
+}
+
+/// The 68000 posting a byte at the sound board (§7.5). Which latch it lands in
+/// is the address; the Z80 reads them back at 0xf008 and 0xf00a.
+pub fn post(s: *SoundBoard, which: u1, value: u8) void {
+    s.latch[which] = value;
 }
 
 // --------------------------------------------------------------------- bus
@@ -141,13 +195,27 @@ pub fn z80Read8(s: *SoundBoard, addr: u16) u8 {
     const as_op = fetching and s.m1;
     if (fetching) s.fetch +%= 1;
 
+    // The two halves of the ROM are the same on both boards; only what sits
+    // above them differs.
     const byte = switch (addr) {
         fixed_lo...fixed_hi => if (as_op) s.op[addr] else s.data[addr],
         bank_lo...bank_hi => peek(s.rom, bankOffset(s.bank) + (addr - bank_lo)),
-        shared0_lo...shared0_hi => s.shared[0][addr - shared0_lo],
-        shared1_lo...shared1_hi => s.shared[1][addr - shared1_lo],
-        qsound_status => qsound.read(&s.q),
-        else => blank,
+        else => switch (s.kind) {
+            .cps1 => switch (addr) {
+                work_lo...work_hi => s.shared[0][addr - work_lo],
+                ym_lo, ym_hi => ym2151.read(&s.ym),
+                oki_port => oki.read(&s.m6295),
+                latch0 => s.latch[0],
+                latch1 => s.latch[1],
+                else => blank,
+            },
+            else => switch (addr) {
+                shared0_lo...shared0_hi => s.shared[0][addr - shared0_lo],
+                shared1_lo...shared1_hi => s.shared[1][addr - shared1_lo],
+                qsound_status => qsound.read(&s.q),
+                else => blank,
+            },
+        },
     };
     if (as_op) nextIsOpcode(s, byte);
     return byte;
@@ -179,12 +247,24 @@ fn nextIsOpcode(s: *SoundBoard, byte: u8) void {
 }
 
 pub fn z80Write8(s: *SoundBoard, addr: u16, value: u8) void {
-    switch (addr) {
-        shared0_lo...shared0_hi => s.shared[0][addr - shared0_lo] = value,
-        shared1_lo...shared1_hi => s.shared[1][addr - shared1_lo] = value,
-        qsound_lo...qsound_hi => qsound.write(&s.q, addr - qsound_lo, value),
-        banksw => s.bank = @truncate(value),
-        else => {},
+    switch (s.kind) {
+        .cps1 => switch (addr) {
+            work_lo...work_hi => s.shared[0][addr - work_lo] = value,
+            ym_lo, ym_hi => ym2151.write(&s.ym, addr - ym_lo, value),
+            oki_port => oki.write(&s.m6295, value),
+            // Two banks here, not sixteen: the CPS-1 board's window is wired to
+            // one line of the latch.
+            cps1_banksw => s.bank = @truncate(value & 1),
+            oki_pin7 => s.m6295.pin7 = value & 1 != 0,
+            else => {},
+        },
+        else => switch (addr) {
+            shared0_lo...shared0_hi => s.shared[0][addr - shared0_lo] = value,
+            shared1_lo...shared1_hi => s.shared[1][addr - shared1_lo] = value,
+            qsound_lo...qsound_hi => qsound.write(&s.q, addr - qsound_lo, value),
+            banksw => s.bank = @truncate(value),
+            else => {},
+        },
     }
 }
 
@@ -219,7 +299,7 @@ const testing = std.testing;
 /// came from, so a read landing in the wrong bank is visible.
 fn withRom(rom: []const u8) SoundBoard {
     var s = SoundBoard{};
-    load(&s, rom, &.{}, null);
+    load(&s, .qsound, rom, &.{}, null);
     return s;
 }
 
@@ -261,7 +341,7 @@ test "the fixed ROM answers one byte to a fetch and another to a data read" {
     rom[at] = kabuki.encodeByte(key, at, .op, 0xaa);
 
     var s = SoundBoard{};
-    load(&s, &rom, &.{}, key);
+    load(&s, .qsound, &rom, &.{}, key);
 
     // The cursor is where the next instruction byte is due, so this read is a
     // fetch and gets the opcode view.
@@ -285,4 +365,49 @@ test "the QSound ports latch, and the chip answers ready once it has run" {
     try testing.expectEqual(@as(u8, 0), z80Read8(&s, qsound_status));
     for (0..8) |_| _ = qsound.sample(&s.q);
     try testing.expectEqual(@as(u8, qsound.ready), z80Read8(&s, qsound_status));
+}
+
+test "the CPS-1 board's map is the same ROM under a different set of chips" {
+    var rom: [bank_base + 2 * bank_bytes]u8 = @splat(0);
+    rom[0] = 0xc9;
+    for (0..2) |b| rom[bank_base + b * bank_bytes] = @intCast(0xb0 + b);
+
+    var s = SoundBoard{};
+    load(&s, .cps1, &rom, &.{}, null);
+
+    // The bottom half of the map is what it was, and the bank window still
+    // works — with two banks rather than sixteen.
+    try testing.expectEqual(@as(u8, 0xc9), z80Read8(&s, 0));
+    try testing.expectEqual(@as(u8, 0xb0), z80Read8(&s, bank_lo));
+    z80Write8(&s, cps1_banksw, 0xff);
+    try testing.expectEqual(@as(u8, 1), s.bank);
+    try testing.expectEqual(@as(u8, 0xb1), z80Read8(&s, bank_lo));
+
+    // Where a QSound board has shared RAM this one has nothing at all, and its
+    // work RAM is 2 KiB somewhere else.
+    try testing.expectEqual(@as(u8, blank), z80Read8(&s, shared0_lo));
+    z80Write8(&s, work_hi, 0x5a);
+    try testing.expectEqual(@as(u8, 0x5a), z80Read8(&s, work_hi));
+
+    // The 68000 posts, the Z80 reads back, one latch each.
+    post(&s, 0, 0x12);
+    post(&s, 1, 0x34);
+    try testing.expectEqual(@as(u8, 0x12), z80Read8(&s, latch0));
+    try testing.expectEqual(@as(u8, 0x34), z80Read8(&s, latch1));
+
+    // Both chips answer where the driver pokes them: a timer set at the OPM
+    // raises the Z80's interrupt, and pin 7 changes the M6295's rate.
+    z80Write8(&s, ym_lo, ym2151.reg_clka1);
+    z80Write8(&s, ym_hi, 0xff);
+    z80Write8(&s, ym_lo, ym2151.reg_clka2);
+    z80Write8(&s, ym_hi, 0x03);
+    z80Write8(&s, ym_lo, ym2151.reg_control);
+    z80Write8(&s, ym_hi, ym2151.load_a | ym2151.irq_en_a);
+    _ = ym2151.sample(&s.ym);
+    try testing.expectEqual(ym2151.status_flag_a, z80Read8(&s, ym_lo));
+
+    try testing.expectEqual(oki.divider_high, oki.divider(&s.m6295));
+    z80Write8(&s, oki_pin7, 0);
+    try testing.expectEqual(oki.divider_low, oki.divider(&s.m6295));
+    try testing.expectEqual(@as(u8, oki.status_high), z80Read8(&s, oki_port));
 }
