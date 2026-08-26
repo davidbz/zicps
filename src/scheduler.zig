@@ -78,9 +78,10 @@ pub const oki_hz = 1_000_000;
 pub const ref_per_oki_high = reference_hz / oki_hz * oki.divider_high;
 pub const ref_per_oki_low = reference_hz / oki_hz * oki.divider_low;
 
-/// What the board's mixer makes of the two, as MAME weights them.
+/// What the board's mixer makes of the two, as MAME weights them, as hundredths.
 pub const fm_gain = 35;
 pub const adpcm_gain = 30;
+const gain_denominator = 100;
 
 /// The sound board's Z80 takes a periodic interrupt off a divider on its own
 /// clock: 8 MHz over 32000 is 250 Hz, which is what a driver counts its
@@ -236,8 +237,10 @@ fn runCps1(c: *cps.Cps) void {
     }
 }
 
-fn mix(fm: i16, adpcm: i16) i16 {
-    const v = @divTrunc(@as(i32, fm) * fm_gain + @as(i32, adpcm) * adpcm_gain, 100);
+/// The one place the two chips' headroom is spent: the M6295 hands over more
+/// than a sample can hold, and it is the weights that bring it back into one.
+fn mix(fm: i16, adpcm: i32) i16 {
+    const v = @divTrunc(@as(i32, fm) * fm_gain + adpcm * adpcm_gain, gain_denominator);
     return @intCast(std.math.clamp(v, std.math.minInt(i16), std.math.maxInt(i16)));
 }
 

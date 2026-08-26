@@ -12,11 +12,11 @@
 //! into two buffers, one for opcode fetches and one for data reads
 //! (`kabuki.zig`). The banked half is not encrypted at all.
 //!
-//! Two boards, one file (§7.5). A plain CPS-1 board is the same Z80, the same
-//! bank window and the same ROM views; only the map above them differs — two
-//! chips and two command latches instead of the shared RAM and the DL-1425. So
-//! the difference is a tag and a branch in the bus switch that is already here,
-//! not a second module.
+//! Two boards, one file. A plain CPS-1 board is the same Z80, the same bank
+//! window and the same ROM views; only the map above them differs — two chips
+//! and two command latches instead of the shared RAM and the DL-1425. So the
+//! difference is a tag and a branch in the bus switch that is already here, not
+//! a second module.
 
 const std = @import("std");
 const board = @import("board");
@@ -75,6 +75,10 @@ pub const bank_base = 0x10000;
 /// Unpopulated address space, and unpopulated ROM: both read as an erased
 /// EPROM on a bus with nothing driving it.
 pub const blank = 0xff;
+
+/// A port with one wire on it rather than eight, which is how the CPS-1 board
+/// hangs its bank line and the M6295's pin 7 off the Z80.
+const wire = 0x01;
 
 pub const SoundBoard = struct {
     /// Which board this is, and so which map the bus switch takes.
@@ -182,8 +186,8 @@ pub fn reset(s: *SoundBoard) void {
     oki.reset(&s.m6295);
 }
 
-/// The 68000 posting a byte at the sound board (§7.5). Which latch it lands in
-/// is the address; the Z80 reads them back at 0xf008 and 0xf00a.
+/// The 68000 posting a byte at the sound board. Which latch it lands in is the
+/// address; the Z80 reads them back at 0xf008 and 0xf00a.
 pub fn post(s: *SoundBoard, which: u1, value: u8) void {
     s.latch[which] = value;
 }
@@ -201,24 +205,32 @@ pub fn z80Read8(s: *SoundBoard, addr: u16) u8 {
         fixed_lo...fixed_hi => if (as_op) s.op[addr] else s.data[addr],
         bank_lo...bank_hi => peek(s.rom, bankOffset(s.bank) + (addr - bank_lo)),
         else => switch (s.kind) {
-            .cps1 => switch (addr) {
-                work_lo...work_hi => s.shared[0][addr - work_lo],
-                ym_lo, ym_hi => ym2151.read(&s.ym),
-                oki_port => oki.read(&s.m6295),
-                latch0 => s.latch[0],
-                latch1 => s.latch[1],
-                else => blank,
-            },
-            else => switch (addr) {
-                shared0_lo...shared0_hi => s.shared[0][addr - shared0_lo],
-                shared1_lo...shared1_hi => s.shared[1][addr - shared1_lo],
-                qsound_status => qsound.read(&s.q),
-                else => blank,
-            },
+            .cps1 => readCps1(s, addr),
+            else => readQsound(s, addr),
         },
     };
     if (as_op) nextIsOpcode(s, byte);
     return byte;
+}
+
+fn readCps1(s: *SoundBoard, addr: u16) u8 {
+    return switch (addr) {
+        work_lo...work_hi => s.shared[0][addr - work_lo],
+        ym_lo, ym_hi => ym2151.read(&s.ym),
+        oki_port => oki.read(&s.m6295),
+        latch0 => s.latch[0],
+        latch1 => s.latch[1],
+        else => blank,
+    };
+}
+
+fn readQsound(s: *SoundBoard, addr: u16) u8 {
+    return switch (addr) {
+        shared0_lo...shared0_hi => s.shared[0][addr - shared0_lo],
+        shared1_lo...shared1_hi => s.shared[1][addr - shared1_lo],
+        qsound_status => qsound.read(&s.q),
+        else => blank,
+    };
 }
 
 /// Whether the byte after this opcode byte is another one. Only a prefix is
@@ -248,23 +260,31 @@ fn nextIsOpcode(s: *SoundBoard, byte: u8) void {
 
 pub fn z80Write8(s: *SoundBoard, addr: u16, value: u8) void {
     switch (s.kind) {
-        .cps1 => switch (addr) {
-            work_lo...work_hi => s.shared[0][addr - work_lo] = value,
-            ym_lo, ym_hi => ym2151.write(&s.ym, addr - ym_lo, value),
-            oki_port => oki.write(&s.m6295, value),
-            // Two banks here, not sixteen: the CPS-1 board's window is wired to
-            // one line of the latch.
-            cps1_banksw => s.bank = @truncate(value & 1),
-            oki_pin7 => s.m6295.pin7 = value & 1 != 0,
-            else => {},
-        },
-        else => switch (addr) {
-            shared0_lo...shared0_hi => s.shared[0][addr - shared0_lo] = value,
-            shared1_lo...shared1_hi => s.shared[1][addr - shared1_lo] = value,
-            qsound_lo...qsound_hi => qsound.write(&s.q, addr - qsound_lo, value),
-            banksw => s.bank = @truncate(value),
-            else => {},
-        },
+        .cps1 => writeCps1(s, addr, value),
+        else => writeQsound(s, addr, value),
+    }
+}
+
+fn writeCps1(s: *SoundBoard, addr: u16, value: u8) void {
+    switch (addr) {
+        work_lo...work_hi => s.shared[0][addr - work_lo] = value,
+        ym_lo, ym_hi => ym2151.write(&s.ym, addr - ym_lo, value),
+        oki_port => oki.write(&s.m6295, value),
+        // Two banks here, not sixteen: the CPS-1 board's window is wired to one
+        // line of the latch, and pin 7 is wired to another.
+        cps1_banksw => s.bank = @truncate(value & wire),
+        oki_pin7 => s.m6295.pin7 = value & wire != 0,
+        else => {},
+    }
+}
+
+fn writeQsound(s: *SoundBoard, addr: u16, value: u8) void {
+    switch (addr) {
+        shared0_lo...shared0_hi => s.shared[0][addr - shared0_lo] = value,
+        shared1_lo...shared1_hi => s.shared[1][addr - shared1_lo] = value,
+        qsound_lo...qsound_hi => qsound.write(&s.q, addr - qsound_lo, value),
+        banksw => s.bank = @truncate(value),
+        else => {},
     }
 }
 
