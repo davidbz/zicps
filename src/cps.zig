@@ -375,7 +375,7 @@ pub fn read16(c: *Cps, addr: u24) u16 {
         // word is nothing at all.
         eeprom_lo...eeprom_hi => open_bus & ~@as(u16, 1) | c.eeprom.read(),
         ram_lo...ram_hi => peek(&c.ram, addr - ram_lo),
-        else => open_bus,
+        else => cboard(c, addr),
     };
 }
 
@@ -417,6 +417,21 @@ fn in1(c: *const Cps) u16 {
     const low: u16 = c.inputs.pad[0] & lowMask(in1_player_bits);
     const high: u16 = c.inputs.pad[1] & lowMask(in1_player_bits);
     return ~(low | high << 8);
+}
+
+/// The extra controls a C-board carries. A CPS-1.5 board has them at a fixed
+/// address; a plain CPS-1 board's C-board decodes them into the 0x800000
+/// window instead, at an offset that moves from board to board and that the
+/// board file carries. Without this a six-button game reads its kicks as an
+/// unpressed panel and only ever punches.
+///
+/// ponytail: the same pins are player 3 on a three-player cabinet's C-board,
+/// and this hands those games player 1's buttons 4 to 6. Split it when a third
+/// player is worth having.
+fn cboard(c: *const Cps, addr: u24) u16 {
+    const off = c.board.in2_offset orelse return open_bus;
+    if (addr == in1_lo + @as(u24, off)) return in2(c);
+    return open_bus;
 }
 
 fn in2(c: *const Cps) u16 {
@@ -553,6 +568,15 @@ test "controls are wired to ground, so a pressed button reads as a zero" {
     try testing.expectEqual(@as(u16, ~@as(u16, 0x0018 | 0x0200)), read16(&c, in1_lo));
     // Button 6 is on IN2 instead, four bits up for player 2.
     try testing.expectEqual(@as(u16, ~@as(u16, 0x04)), read16(&c, in2_lo));
+
+    // A plain CPS-1 board reads the same bits where its C-board decodes them,
+    // which is where the board file says and nowhere else.
+    try testing.expectEqual(@as(u16, 0xffff), read16(&c, in1_lo + 0x36));
+    c.board.in2_offset = 0x36;
+    try testing.expectEqual(@as(u16, ~@as(u16, 0x04)), read16(&c, in1_lo + 0x36));
+    try testing.expectEqual(@as(u8, 0xfb), read8(&c, in1_lo + 0x37));
+    try testing.expectEqual(@as(u16, 0xffff), read16(&c, in1_lo + 0x3c));
+    c.board.in2_offset = null;
 
     c.inputs.panel = Panel.coin1.mask() | Panel.start2.mask();
     try testing.expectEqual(@as(u16, 0xde), read8(&c, in0_lo));
