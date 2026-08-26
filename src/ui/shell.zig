@@ -43,6 +43,7 @@ pub const Request = union(enum) {
 const Page = enum {
     root,
     load,
+    recent,
     save_state,
     load_state,
     options,
@@ -97,6 +98,7 @@ pub const Tone = enum { plain, good, bad };
 const root_items = [_]Item{
     .{ .label = "Resume", .act = .close },
     .{ .label = "Load Set", .act = .{ .goto = .load } },
+    .{ .label = "Recent", .act = .{ .goto = .recent } },
     .{ .label = "Save State", .act = .{ .goto = .save_state } },
     .{ .label = "Load State", .act = .{ .goto = .load_state } },
     .{ .label = "Options", .act = .{ .goto = .options } },
@@ -217,8 +219,8 @@ pub const Ui = struct {
             .video => &video_items,
             .audio => &audio_items,
             .keys => &key_items,
-            // The browser and the slot list draw their own.
-            .load, .save_state, .load_state => &.{},
+            // The browser, the recent list and the slot list draw their own.
+            .load, .recent, .save_state, .load_state => &.{},
         };
     }
 
@@ -375,6 +377,7 @@ fn captureKey(ui: *Ui, cfg: *Config, action: Action) Request {
 
 fn menuKeys(ui: *Ui, cfg: *Config) Request {
     if (ui.page == .load) return browserKeys(ui);
+    if (ui.page == .recent) return recentKeys(ui, cfg);
     if (ui.page.isSlots()) return slotKeys(ui);
 
     const items = ui.items();
@@ -401,6 +404,12 @@ fn menuKeys(ui: *Ui, cfg: *Config) Request {
 
     return switch (items[ui.sel].act) {
         .goto => |page| {
+            // An empty list is a page with nothing on it and no way to tell
+            // that from a bug, so it says so and stays where it is.
+            if (page == .recent and cfg.recentCount() == 0) {
+                ui.status("no sets loaded yet", .{});
+                return .none;
+            }
             ui.goto(page);
             if (page == .load) ui.browser.reload();
             return .none;
@@ -451,6 +460,34 @@ fn slotKeys(ui: *Ui) Request {
     }
     ui.open = false;
     return if (saving) .{ .save_state = ui.slot_sel } else .{ .load_state = ui.slot_sel };
+}
+
+/// The sets loaded lately, as the config file remembers them. A row is a path
+/// that was good once and may not be now: nothing here checks, because a load
+/// that fails already says so, and a list that quietly dropped a row the user
+/// is looking for would be worse than one that tries and reports.
+fn recentKeys(ui: *Ui, cfg: *Config) Request {
+    const n = cfg.recentCount();
+    if (n == 0) {
+        ui.goto(.root);
+        return .none;
+    }
+    if (repeat(rl.KEY_DOWN)) ui.sel = (ui.sel + 1) % n;
+    if (repeat(rl.KEY_UP)) ui.sel = (ui.sel + n - 1) % n;
+    if (hoveredRow(ui.sel, n)) |row| ui.sel = row;
+
+    if (rl.IsKeyPressed(rl.KEY_ESCAPE)) {
+        ui.goto(.root);
+        return .none;
+    }
+    const clicked = rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT) and mouseRow(n) != null;
+    if (!rl.IsKeyPressed(rl.KEY_ENTER) and !clicked) return .none;
+
+    // Copied out of the config and into `ui.path` because loading rewrites the
+    // list the row was pointing into.
+    setText(ui.path[0..], cfg.recentAt(ui.sel));
+    ui.open = false;
+    return .{ .load = std.mem.sliceTo(&ui.path, 0) };
 }
 
 fn adjust(ui: *Ui, cfg: *Config, act: Act, delta: i32) Request {
@@ -730,6 +767,7 @@ pub fn draw(ui: *const Ui, cfg: *const Config) void {
     const title = switch (ui.page) {
         .root => "zicps",
         .load => "Load Set - Enter opens a directory, Space loads it",
+        .recent => "Recent",
         .save_state => "Save State",
         .load_state => "Load State",
         .options => "Options",
@@ -740,6 +778,7 @@ pub fn draw(ui: *const Ui, cfg: *const Config) void {
     rl.DrawText(title, half(fs), half(fs), fs, dim);
 
     if (ui.page == .load) return drawBrowser(ui);
+    if (ui.page == .recent) return drawRecent(ui, cfg);
     if (ui.page.isSlots()) return drawSlots(ui);
 
     var buf: [64]u8 = undefined;
@@ -857,6 +896,35 @@ fn drawBrowser(ui: *const Ui) void {
         drawRow(y, selected);
         const color = if (selected) hilite else if (b.isDir(i)) dim else fg;
         rl.DrawText(b.name(i), fs, y, fs, color);
+    }
+}
+
+/// The recent list: the set's own name on the left, where the eye is already
+/// looking, and the directory it came from hanging off the right the way a
+/// value does. Two sets of the same name in different directories are the
+/// reason the second half is drawn at all.
+fn drawRecent(ui: *const Ui, cfg: *const Config) void {
+    const fs = fontSize();
+    const n = cfg.recentCount();
+    const first = firstVisible(ui.sel, n, visibleRows());
+    var buf: [config.max_recent_path]u8 = undefined;
+    for (first..@min(n, first + visibleRows()), 0..) |i, row| {
+        const y = topY() + rowHeight() * @as(c_int, @intCast(row));
+        const selected = i == ui.sel;
+        drawRow(y, selected);
+
+        const path = cfg.recentAt(i);
+        const name = std.fmt.bufPrintZ(&buf, "{s}", .{std.fs.path.basename(path)}) catch continue;
+        rl.DrawText(name.ptr, fs, y, fs, if (selected) hilite else fg);
+
+        // The directory only, and only if it fits: a path that would run into
+        // the name is left off, because the name is the half that identifies.
+        const dir = std.fs.path.dirname(path) orelse continue;
+        var dir_buf: [config.max_recent_path]u8 = undefined;
+        const text = std.fmt.bufPrintZ(&dir_buf, "{s}", .{dir}) catch continue;
+        const width = rl.MeasureText(text.ptr, fs);
+        const x = rl.GetScreenWidth() - fs - width;
+        if (x > fs * 2 + rl.MeasureText(name.ptr, fs)) rl.DrawText(text.ptr, x, y, fs, dim);
     }
 }
 
@@ -1519,7 +1587,8 @@ test "every action has a row on the keys page, and every page has rows" {
     }
     inline for (@typeInfo(Page).@"enum".fields) |field| {
         ui.page = @enumFromInt(field.value);
-        // The browser and the slot list are the two that draw their own rows.
-        try std.testing.expect(ui.items().len > 0 or ui.page == .load or ui.page.isSlots());
+        // The browser, the recent list and the slot list draw their own rows.
+        const own = ui.page == .load or ui.page == .recent or ui.page.isSlots();
+        try std.testing.expect(ui.items().len > 0 or own);
     }
 }

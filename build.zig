@@ -152,6 +152,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "board", .module = board },
+            .{ .name = "romset", .module = romset },
             .{ .name = "list", .module = board_list },
         },
     });
@@ -279,6 +280,54 @@ pub fn build(b: *std.Build) void {
         ym2151, oki,    state,
     };
     for (modules) |module| {
+        const tests = b.addTest(.{ .root_module = module });
+        test_step.dependOn(&b.addRunArtifact(tests).step);
+        check_step.dependOn(&tests.step);
+    }
+
+    // --- the sweep -----------------------------------------------------------
+    // `zig build compat -- <directory of sets>`: boot every set that is there
+    // and report what happened. Nothing it prints is a gate — it needs ROMs
+    // this repo may not have, and it is triage rather than a test — so it is
+    // its own step and no part of `test`. Its own arithmetic is unit-tested.
+    const compat_module = b.createModule(.{
+        .root_source_file = b.path("test/compat.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "boards", .module = boards },
+            .{ .name = "cps", .module = cps },
+            .{ .name = "scheduler", .module = scheduler },
+        },
+    });
+    const compat = b.addExecutable(.{ .name = "compat", .root_module = compat_module });
+    const sweep = b.addRunArtifact(compat);
+    sweep.setCwd(b.path("."));
+    if (b.args) |args| sweep.addArgs(args);
+    b.step("compat", "Boot every set in a directory and report what happened").dependOn(&sweep.step);
+
+    // The video state differential of §10: MAME's graphics RAM and register
+    // file, rendered by this renderer. Also run by hand, against a dump that
+    // is gitignored, and also gating nothing.
+    const video_diff_module = b.createModule(.{
+        .root_source_file = b.path("test/video_diff.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "boards", .module = boards },
+            .{ .name = "cps", .module = cps },
+            .{ .name = "video", .module = video },
+        },
+    });
+    const video_diff = b.addExecutable(.{ .name = "video_diff", .root_module = video_diff_module });
+    const diff_run = b.addRunArtifact(video_diff);
+    diff_run.setCwd(b.path("."));
+    if (b.args) |args| diff_run.addArgs(args);
+    b.step("video-diff", "Render a MAME video-state dump with this renderer").dependOn(&diff_run.step);
+
+    for ([_]*std.Build.Module{ compat_module, video_diff_module }) |module| {
         const tests = b.addTest(.{ .root_module = module });
         test_step.dependOn(&b.addRunArtifact(tests).step);
         check_step.dependOn(&tests.step);
