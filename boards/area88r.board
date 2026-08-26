@@ -17,6 +17,11 @@ gfx = 0x000002 0x080000 word64 ara_02.4a crc=0xa02945f4
 gfx = 0x000004 0x080000 word64 ara_03.5a crc=0x5965ca8d
 gfx = 0x000006 0x080000 word64 ara_04.6a crc=0xac6db17d
 
+audio = 0x000000 0x008000 byte   ara_09.12a crc=0xaf88359c
+audio = 0x010000 0x018000 byte   ara_09.12a 0x8000 crc=0xaf88359c
+
+oki = 0x000000 0x020000 byte   ara_18.11c crc=0x584b43a9
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

@@ -23,6 +23,8 @@ pub const max_program = 4 << 20;
 pub const max_gfx = 16 << 20;
 pub const max_audio = 512 << 10;
 pub const max_qsound = 8 << 20;
+/// Every set in MAME's CPS-1 driver fills the M6295's two banks and no more.
+pub const max_oki = 256 << 10;
 /// No chip on either board is bigger than this, so no file needs to be.
 pub const max_file = 8 << 20;
 
@@ -38,12 +40,15 @@ pub const Set = struct {
     audio: []u8,
     /// QSound sample ROM.
     qsound: []u8,
+    /// OKI M6295 sample ROM: ADPCM phrases behind an eight-bit bank.
+    oki: []u8,
 
     pub fn deinit(s: *Set, gpa: std.mem.Allocator) void {
         gpa.free(s.program);
         gpa.free(s.gfx);
         gpa.free(s.audio);
         gpa.free(s.qsound);
+        gpa.free(s.oki);
         s.* = undefined;
     }
 };
@@ -69,6 +74,8 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
     errdefer gpa.free(audio);
     const qsound = try alloc(gpa, sizes.get(.qsound));
     errdefer gpa.free(qsound);
+    const oki = try alloc(gpa, sizes.get(.oki));
+    errdefer gpa.free(oki);
 
     const packed_gfx = try alloc(gpa, sizes.get(.gfx));
     defer gpa.free(packed_gfx);
@@ -78,13 +85,14 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
         .gfx = packed_gfx,
         .audio = audio,
         .qsound = qsound,
+        .oki = oki,
     }), diag);
 
     const gfx = try alloc(gpa, packed_gfx.len * pixels_per_byte);
     errdefer gpa.free(gfx);
     decode(packed_gfx, gfx);
 
-    return .{ .program = program, .gfx = gfx, .audio = audio, .qsound = qsound };
+    return .{ .program = program, .gfx = gfx, .audio = audio, .qsound = qsound, .oki = oki };
 }
 
 /// Reads every chip the board file names into the region it belongs to. A file
@@ -129,6 +137,7 @@ fn limit(region: board.Region) u64 {
         .gfx => max_gfx,
         .audio => max_audio,
         .qsound => max_qsound,
+        .oki => max_oki,
     };
 }
 
@@ -488,7 +497,7 @@ test "a set under the right name that is not the right dump is refused" {
 }
 
 test "a board file asking for more than a board can hold is refused" {
-    var sizes = [4]u64{ max_program + 1, 0, 0, 0 };
+    var sizes = [board.region_count]u64{ max_program + 1, 0, 0, 0, 0 };
     var diag = board.Diag{};
     try testing.expectError(error.BadRomSet, cap(&sizes, &diag));
     try testing.expect(std.mem.indexOf(u8, diag.message(), "program") != null);

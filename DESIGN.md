@@ -229,6 +229,12 @@ board on a machine this project calls a QSound machine, which is still what they
 are — but they are also 175 of the 194 sets in the library, and a library that
 size where nine sets in ten are silent is not the thing §1 set out to build.
 
+A plain CPS-1 board also has three banks of DIP switches where a QSound board
+has none, and zicps has no way to turn them: they read as the factory settings.
+The one that matters is bank C's demo sounds, which reads zero when it is on —
+left the other way, every one of those 175 sets stays silent until someone puts
+a coin in.
+
 ### 5.2 The window
 
 One window, simple design, no toolbar clutter. Three states, as in zigesis:
@@ -1075,6 +1081,31 @@ Acceptance:
   harness of §10.
 - M7's sweep reports something heard for every set that has an `audio` region,
   which is the whole library minus the sets §8.2's ceilings already exclude.
+
+Ceilings, so nobody has to rediscover them:
+
+- The OPM is a model of the chip a sample at a time, not of the die a gate at a
+  time, and four things are left in `test/opm_ref_test.zig`'s `allowed`, which
+  is 19540 of 8192 full scale on the worst of seven cases. It keys and hears
+  all 32 operators on one sample boundary where the die sweeps them across one,
+  so a channel's fourth operator starts a sample early and a four-deep
+  algorithm multiplies that; its phase increments are a computed equal-tempered
+  octave rather than the chip's own approximation of one; its LFO waveforms are
+  the published shapes; and its noise is a shift register of the right length
+  and not the right polynomial. Everything else was diffed and fixed — the
+  envelope's three low-rate counters, the latched counter the fast rates read
+  through, the key-on bits being in algorithm order, and the seven PMS depths,
+  which are powers of two and then five and eleven of the last, not the
+  manual's rounded cents. The per-case table the harness prints on failure is
+  the thing to read: a regression moves one case, not all of them.
+- The M6295 steps once per scheduler line rather than once per sample edge, and
+  its four voices are summed and held between its own samples at a seventh of
+  the OPM's rate. Nothing in the library asks for finer.
+- M7's sweep does not exist yet, so the acceptance line above is met by the
+  `peak` the headless runner now prints beside its audio hash: `sf2`, `cawing`,
+  `ffight`, `mercs` and `captcomm` all reach it from attract alone. The QSound
+  sets reach it only once coined, because their settings live in a service menu
+  and not in a DIP bank — that is M4's board, not this one, and it is open.
 
 Explicitly not in M9: the 68000's clock. `cps1_10MHz` is MAME's base config and
 `cps1_12MHz` the override, so roughly half the library currently runs its 68000

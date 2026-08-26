@@ -51,6 +51,12 @@ gfx = 0x300005 0x020000 byte64 kr_20.9c crc=0xbd4bffb8
 gfx = 0x300006 0x020000 byte64 kr_29.11e crc=0x1387a076
 gfx = 0x300007 0x020000 byte64 kr_22.11c crc=0xfd351922
 
+audio = 0x000000 0x008000 byte   kr_23.13b crc=0x5e44d9ee
+audio = 0x010000 0x008000 byte   kr_23.13b 0x8000 crc=0x5e44d9ee
+
+oki = 0x000000 0x020000 byte   kr_30.12c crc=0xda69d15f
+oki = 0x020000 0x020000 byte   kr_31.13c crc=0xbfc654e9
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x28
 priority        = 0x26 0x24 0x22 0x20

@@ -35,6 +35,11 @@ gfx = 0x000007 0x040000 byte64 04.u13 crc=0x44cd5e95
 gfx = 0x200006 0x040000 byte64 11.u22 crc=0x29194b90
 gfx = 0x200007 0x040000 byte64 03.u12 crc=0x7e28974e
 
+audio = 0x000000 0x008000 byte   pa3_11.11f crc=0xcb1423a2
+
+oki = 0x000000 0x020000 byte   pa3_05.10d crc=0x73a10d5d
+oki = 0x020000 0x020000 byte   pa3_06.11d crc=0xaffa4f82
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

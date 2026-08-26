@@ -29,6 +29,12 @@ gfx = 0x100005 0x020000 byte64 pnij_19.7c crc=0xaf08b230
 gfx = 0x100006 0x020000 byte64 pnij_39.9h crc=0x70fbe579
 gfx = 0x100007 0x020000 byte64 pnij_33.9f crc=0x3ed2c680
 
+audio = 0x000000 0x008000 byte   pnij_17.13b crc=0xe86f787a
+audio = 0x010000 0x008000 byte   pnij_17.13b 0x8000 crc=0xe86f787a
+
+oki = 0x000000 0x020000 byte   pnij_24.12c crc=0x5092257d
+oki = 0x020000 0x020000 byte   pnij_25.13c crc=0x22109aaa
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

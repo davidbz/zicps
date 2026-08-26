@@ -53,6 +53,19 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "audio", .module = audio }},
     });
 
+    const ym2151 = b.addModule("ym2151", .{
+        .root_source_file = b.path("src/ym2151.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "audio", .module = audio }},
+    });
+
+    const oki = b.addModule("oki", .{
+        .root_source_file = b.path("src/oki.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // The sound board: its own Z80, its own view of its own ROM, its own chip.
     // The 68000 side reaches it through shared RAM and nothing else, which is
     // what the hardware does too.
@@ -64,6 +77,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "board", .module = board },
             .{ .name = "kabuki", .module = kabuki },
             .{ .name = "qsound", .module = qsound },
+            .{ .name = "ym2151", .module = ym2151 },
+            .{ .name = "oki", .module = oki },
             .{ .name = "z80", .module = z80.module("z80") },
         },
     });
@@ -92,6 +107,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "audio", .module = audio },
             .{ .name = "soundboard", .module = soundboard },
             .{ .name = "qsound", .module = qsound },
+            .{ .name = "ym2151", .module = ym2151 },
+            .{ .name = "oki", .module = oki },
         },
     });
 
@@ -215,9 +232,40 @@ pub fn build(b: *std.Build) void {
         ).step);
     }
 
+    // The same arrangement for the OPM, against nukeykt's Nuked-OPM.
+    const opm_ref = b.step("opm-ref", "Diff the YM2151 core against Nuked-OPM");
+    const opm_reference = "testdata/Nuked-OPM";
+    if (b.build_root.handle.access(b.graph.io, opm_reference ++ "/opm.c", .{})) |_| {
+        const opm_module = b.createModule(.{
+            .root_source_file = b.path("test/opm_ref_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            // The reference is a gate-level model and shifts negative values
+            // throughout, which C calls undefined and the sanitiser traps.
+            .sanitize_c = .off,
+            .imports = &.{.{ .name = "ym2151", .module = ym2151 }},
+        });
+        opm_module.addIncludePath(b.path(opm_reference));
+        opm_module.addCSourceFile(.{
+            .file = b.path(opm_reference ++ "/opm.c"),
+            .flags = &.{"-std=gnu99"},
+        });
+        const opm_test = b.addTest(.{ .root_module = opm_module });
+        const run_opm = b.addRunArtifact(opm_test);
+        opm_ref.dependOn(&run_opm.step);
+        test_step.dependOn(&run_opm.step);
+        check_step.dependOn(&opm_test.step);
+    } else |_| {
+        opm_ref.dependOn(&b.addFail(
+            "no reference to diff against: run tools/fetch_opm_reference.sh first",
+        ).step);
+    }
+
     const modules = [_]*std.Build.Module{
-        board, romset, video,  cps,        scheduler, input,  config,
-        audio, kabuki, qsound, soundboard, snow,      boards, system_tests,
+        board,  romset, video,  cps,        scheduler, input,  config,
+        audio,  kabuki, qsound, soundboard, snow,      boards, system_tests,
+        ym2151, oki,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });

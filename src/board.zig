@@ -64,8 +64,13 @@ pub const Kabuki = struct {
 };
 
 /// Which chip on the board a file's bytes belong to.
-pub const Region = enum { program, gfx, audio, qsound };
+pub const Region = enum { program, gfx, audio, qsound, oki };
 pub const region_count = @typeInfo(Region).@"enum".fields.len;
+/// The two sound boards of §7.5: a Z80 behind a Kabuki with the DL-1425
+/// The two sound boards of �7.5: a Z80 behind a Kabuki with the DL-1425
+/// beside it, or a plain Z80 with a YM2151 and an OKI M6295. `none` is a set
+/// with no sound ROM at all, which only the in-repo test ROM is.
+pub const Sound = enum { none, qsound, cps1 };
 
 /// A tile's attribute word picks one of four priority masks, so the PAL decodes
 /// four registers to hold them.
@@ -168,6 +173,19 @@ pub const Board = struct {
 
     pub fn gfxRanges(b: *const Board) []const GfxRange {
         return b.ranges[0..b.range_count];
+    }
+
+    /// Which of the two sound boards this set came with (§7.5). Nothing in a
+    /// board file says so directly, and nothing needs to: no CPS-1 set has both
+    /// a QSound sample ROM and an OKI one, so the samples name the board.
+    pub fn sound(b: *const Board) Sound {
+        var found = Sound.none;
+        for (b.romList()) |r| switch (r.region) {
+            .qsound => return .qsound,
+            .audio, .oki => found = .cps1,
+            else => {},
+        };
+        return found;
     }
 
     pub fn romList(b: *const Board) []const Rom {
@@ -351,14 +369,14 @@ fn require(b: *const Board, seen_priority: bool, diag: *Diag) Error!void {
     return diag.say("board file is missing: {s}", .{w.buffered()});
 }
 
-/// The sound board's Z80 is behind a Kabuki custom, so a set with a sound ROM
-/// and no key decrypts to noise and executes it. A board file for a set with no
-/// sound ROM at all — the in-repo test ROM — needs no key.
+/// Only the QSound board's Z80 is behind a Kabuki custom, so only that board's
+/// sound ROM decrypts to noise without a key. A CPS-1 board's Z80 is plain, and
+/// a set with no sound ROM at all — the in-repo test ROM — needs no key either.
 fn needsKabuki(b: *const Board, diag: *Diag) Error!void {
-    if (b.kabuki != null) return;
+    if (b.kabuki != null or b.sound() != .qsound) return;
     for (b.romList()) |r| {
         if (r.region == .audio)
-            return diag.say("board file has a sound ROM ({s}) but no `kabuki` key to decrypt it with", .{r.name});
+            return diag.say("board file has a QSound sound ROM ({s}) but no `kabuki` key to decrypt it with", .{r.name});
     }
 }
 
@@ -635,9 +653,15 @@ test "a board file missing what the machine needs names all of it at once" {
 }
 
 test "a sound ROM with no key to decrypt it is refused by name" {
-    const no_key = "version = 1\nlayer_control = 0\npriority = 0 2 4 6\npalette_control = 8\nlayer_enable = 2 4 8 0 0\n" ++
+    const common = "version = 1\nlayer_control = 0\npriority = 0 2 4 6\npalette_control = 8\nlayer_enable = 2 4 8 0 0\n" ++
         "gfx_bank = sprites 0 0xffff 0\nprogram = 0 0x100 word p.bin\naudio = 0 0x8000 byte q.5k\n";
-    try expectRefused(no_key, "q.5k");
+    // The samples say which board this is: with a QSound one the Z80 is behind
+    // a Kabuki and the key is missing, with an OKI one there is nothing to
+    // decrypt and the same sound ROM is fine as it stands.
+    try expectRefused(common ++ "qsound = 0 0x8000 byte q.1m\n", "q.5k");
+    var diag = Diag{};
+    const b = try parse(common ++ "oki = 0 0x8000 byte o.1m\n", &diag);
+    try testing.expectEqual(Sound.cps1, b.sound());
 }
 
 test "comments, blank lines and stray whitespace are not content" {

@@ -731,21 +731,25 @@ test "the test ROM draws its three tilemaps" {
 /// differently for it. They moved a third time when the CPS-B register file was
 /// cut back to the 0x40 bytes the 68000 actually decodes — 128 bytes the hash
 /// had been reading and no bus cycle could ever write — and the scores held
-/// again, which is what says it was dead space and not a register in use.
+/// again, which is what says it was dead space and not a register in use. They
+/// moved a fourth time when the other sound board's two chips joined the hash,
+/// and the scores held once more. The fifth move was the OPM being diffed
+/// against the die rather than read off the manual — its envelope timing, its
+/// key-on order and its LFO depths — and the scores held again.
 const Pin = struct {
     scores: [video.palette_pages]u32,
     hash: u64,
 };
 
 const pinned = [page_count]Pin{
-    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0xf9b1e66f375dd716 },
-    .{ .scores = .{ 1680, 783, 1984, 6358, 0, 0 }, .hash = 0xbb6a5f7fc54ddb93 },
-    .{ .scores = .{ 1616, 783, 2048, 6358, 0, 0 }, .hash = 0x42f4790b997d1507 },
-    .{ .scores = .{ 1680, 783, 0, 8217, 0, 0 }, .hash = 0x88a58fdee1f2334b },
-    .{ .scores = .{ 0, 783, 1488, 8176, 0, 0 }, .hash = 0x14bc183ee84efeed },
-    .{ .scores = .{ 0, 0, 0, 0, 168, 168 }, .hash = 0x92799c66b2a5de73 },
-    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0x9d92f5078dc9d2d1 },
-    .{ .scores = .{ 0, 783, 2208, 6042, 0, 0 }, .hash = 0xd828928db372d6c6 },
+    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0x6e2496b1524fea68 },
+    .{ .scores = .{ 1680, 783, 1984, 6358, 0, 0 }, .hash = 0x6e7cdd00f4bb16d9 },
+    .{ .scores = .{ 1616, 783, 2048, 6358, 0, 0 }, .hash = 0x7822dba68cd86fc9 },
+    .{ .scores = .{ 1680, 783, 0, 8217, 0, 0 }, .hash = 0x81344d1f284a8846 },
+    .{ .scores = .{ 0, 783, 1488, 8176, 0, 0 }, .hash = 0x31bd99f8a810c4a1 },
+    .{ .scores = .{ 0, 0, 0, 0, 168, 168 }, .hash = 0x7a7c7678cbcd693d },
+    .{ .scores = .{ 0, 783, 2208, 7500, 0, 0 }, .hash = 0x1230e3f4f0bba510 },
+    .{ .scores = .{ 0, 783, 2208, 6042, 0, 0 }, .hash = 0x313940a9061bf4dd },
 };
 
 test "scoreboard: every page of the test ROM draws what it drew" {

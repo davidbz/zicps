@@ -16,8 +16,10 @@ const m68k = @import("m68k");
 const cps = @import("cps");
 const video = @import("video");
 const audio = @import("audio");
+const oki = @import("oki");
 const qsound = @import("qsound");
 const soundboard = @import("soundboard");
+const ym2151 = @import("ym2151");
 
 const Core = m68k.Core(cps.Cps);
 
@@ -59,6 +61,26 @@ pub const ref_per_sample = reference_hz / qsound_hz * qsound_divider;
 /// rounded 24_038: the chip's rate is not a whole number of hertz, and the
 /// fraction is what stops 48 kHz output from drifting against it.
 pub const qsound_rate = audio.Rate{ .out = audio.sample_rate * qsound_divider, .in = qsound_hz };
+
+/// The plain CPS-1 sound board's crystal, which the Z80 and the YM2151 share.
+/// It divides into the reference with a remainder, so both of them run off debt
+/// counters rather than a per-line budget.
+pub const cps1_sound_hz = 3_579_545;
+/// The OPM makes one stereo sample every 64 of those clocks: 55.93 kHz.
+pub const opm_divider = ym2151.clock_divider;
+pub const ref_per_opm = reference_hz * opm_divider;
+pub const opm_rate = audio.Rate{ .out = audio.sample_rate * opm_divider, .in = cps1_sound_hz };
+
+/// The M6295's clock on a CPS-1 board is the 16 MHz video crystal over 16, and
+/// pin 7 picks which of two divisors it makes a sample on. Both are whole
+/// numbers of reference ticks, so this chip needs no fraction — only a counter.
+pub const oki_hz = 1_000_000;
+pub const ref_per_oki_high = reference_hz / oki_hz * oki.divider_high;
+pub const ref_per_oki_low = reference_hz / oki_hz * oki.divider_low;
+
+/// What the board's mixer makes of the two, as MAME weights them.
+pub const fm_gain = 35;
+pub const adpcm_gain = 30;
 
 /// The sound board's Z80 takes a periodic interrupt off a divider on its own
 /// clock: 8 MHz over 32000 is 250 Hz, which is what a driver counts its
@@ -140,12 +162,20 @@ fn runLine(c: *cps.Cps, cpu: *m68k.Cpu) void {
 /// meet in shared RAM, and a byte posted there is read a line later at worst,
 /// which is well inside what a sound driver polls at.
 fn runSound(c: *cps.Cps) void {
-    const s = &c.sound;
-
     // A set with no sound ROM has no sound board — the in-repo test ROM is one
     // — and a Z80 fetching 0xff out of empty space would spend
     // the run taking RST 38 and pushing return addresses into RAM.
-    if (s.rom.len == 0) return;
+    if (c.sound.rom.len == 0) return;
+    switch (c.sound.kind) {
+        .cps1 => runCps1(c),
+        else => runQsound(c),
+    }
+}
+
+/// The QSound board: a Z80 on a clock that divides the line evenly, an
+/// interrupt off a divider, and one chip.
+fn runQsound(c: *cps.Cps) void {
+    const s = &c.sound;
 
     c.sound_irq_debt += ref_per_line;
     while (c.sound_irq_debt >= ref_per_sound_irq) : (c.sound_irq_debt -= ref_per_sound_irq) {
@@ -171,6 +201,46 @@ fn runSound(c: *cps.Cps) void {
     }
 }
 
+/// The plain CPS-1 board: a Z80 and an OPM sharing one crystal that divides the
+/// line into a fraction, an M6295 on a crystal of its own, and no interrupt
+/// divider at all — the OPM's timer is the interrupt.
+fn runCps1(c: *cps.Cps) void {
+    const s = &c.sound;
+
+    c.sound_debt += ref_per_line * cps1_sound_hz;
+    const owed = c.sound_debt / reference_hz;
+    c.sound_debt -= owed * reference_hz;
+
+    const budget = owed -| c.sound_over;
+    const start = s.cpu.cycles;
+    while (s.cpu.cycles -% start < budget) {
+        soundboard.interrupt(s);
+        soundboard.step(s);
+    }
+    c.sound_over = c.sound_over + (s.cpu.cycles -% start) - owed;
+
+    // ponytail: the M6295 is stepped a whole line at a time, which at 7.6 kHz
+    // is one sample or none — so a phrase starts up to a line late. Fold it
+    // into the OPM loop below if a game ever turns out to hear the 63 µs.
+    const per_oki: u64 = if (s.m6295.pin7) ref_per_oki_high else ref_per_oki_low;
+    c.oki_debt += ref_per_line;
+    while (c.oki_debt >= per_oki) : (c.oki_debt -= per_oki) c.oki_out = oki.sample(&s.m6295);
+
+    // Both chips go out as one stream at the OPM's rate, which is what the
+    // board's own mixer does with them: the slower chip is held between its
+    // samples rather than resampled.
+    c.sample_debt += ref_per_line * cps1_sound_hz;
+    while (c.sample_debt >= ref_per_opm) : (c.sample_debt -= ref_per_opm) {
+        const f = ym2151.sample(&s.ym);
+        c.mixer.pushNative(mix(f.l, c.oki_out), mix(f.r, c.oki_out), opm_rate);
+    }
+}
+
+fn mix(fm: i16, adpcm: i16) i16 {
+    const v = @divTrunc(@as(i32, fm) * fm_gain + @as(i32, adpcm) * adpcm_gain, 100);
+    return @intCast(std.math.clamp(v, std.math.minInt(i16), std.math.maxInt(i16)));
+}
+
 /// Fills the reset vector and puts the 68000 on it, and hands the sound board
 /// its ROM: the Kabuki key is the board's, so this is the first moment both
 /// halves of the machine are in one place.
@@ -179,7 +249,9 @@ pub fn reset(c: *cps.Cps, cpu: *m68k.Cpu) void {
     Core.reset(cpu, c);
 
     soundboard.reset(&c.sound);
-    soundboard.load(&c.sound, c.rom.audio, c.rom.qsound, c.board.kabuki);
+    const kind = c.board.sound();
+    const samples = if (kind == .cps1) c.rom.oki else c.rom.qsound;
+    soundboard.load(&c.sound, kind, c.rom.audio, samples, c.board.kabuki);
 }
 
 /// Everything a frame can have changed, in one number: what `--frames N` prints
@@ -208,6 +280,13 @@ pub fn hash(c: *const cps.Cps, cpu: *const m68k.Cpu) u64 {
     h.update(std.mem.sliceAsBytes(&c.sound.q.voice));
     h.update(std.mem.sliceAsBytes(&c.sound.q.pan));
     h.update(std.mem.asBytes(&c.sound.q.out));
+    // And the other board's two chips, for the same reason: the OPM's
+    // envelopes and the M6295's position in a phrase are both state a driver
+    // can walk off the end of without anything on screen moving.
+    h.update(std.mem.sliceAsBytes(&c.sound.ym.op));
+    h.update(std.mem.sliceAsBytes(&c.sound.ym.ch));
+    h.update(std.mem.sliceAsBytes(&c.sound.m6295.voice));
+    h.update(std.mem.asBytes(&c.sound.latch));
     h.update(std.mem.asBytes(&c.sound.cpu.pc));
     h.update(std.mem.asBytes(&c.sound.cpu.cycles));
     return h.final();
@@ -231,7 +310,7 @@ fn spinRom() [0x408]u8 {
 fn spinning(rom: []u8) cps.Cps {
     return .{
         .board = .{},
-        .rom = .{ .program = rom, .gfx = &.{}, .audio = &.{}, .qsound = &.{} },
+        .rom = .{ .program = rom, .gfx = &.{}, .audio = &.{}, .qsound = &.{}, .oki = &.{} },
     };
 }
 

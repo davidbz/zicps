@@ -33,6 +33,12 @@ gfx = 0x200006 0x080000 word64 lw-13.10d crc=0x8e058ef5
 gfx = 0x300002 0x020000 byte64 lw_16.11b crc=0x40b26554
 gfx = 0x300003 0x020000 byte64 lw_15.11a crc=0x1b7d2e07
 
+audio = 0x000000 0x008000 byte   lw_00.13c crc=0x59df2a63
+audio = 0x010000 0x008000 byte   lw_00.13c 0x8000 crc=0x59df2a63
+
+oki = 0x000000 0x020000 byte   lw-03u.12e crc=0x807d051f
+oki = 0x020000 0x020000 byte   lw-04u.13e crc=0xe6cd098e
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

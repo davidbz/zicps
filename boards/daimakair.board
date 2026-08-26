@@ -21,6 +21,9 @@ gfx = 0x200002 0x080000 word64 dam_06.8a crc=0xfde89758
 gfx = 0x200004 0x080000 word64 dam_07.9a crc=0xec351d78
 gfx = 0x200006 0x080000 word64 dam_08.10a crc=0xee2acc1e
 
+audio = 0x000000 0x008000 byte   dam_09.12a crc=0x0656ff53
+audio = 0x010000 0x018000 byte   dam_09.12a 0x8000 crc=0x0656ff53
+
 # --- what the battery held -----------------------------------------------
 layer_control   = 0x26
 priority        = 0x28 0x2a 0x2c 0x2e

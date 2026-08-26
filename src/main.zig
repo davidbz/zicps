@@ -257,7 +257,7 @@ pub fn main(init: std.process.Init) !void {
     // the stack, and allocated exactly once whatever set goes in it.
     const c = try gpa.create(cps.Cps);
     defer gpa.destroy(c);
-    c.* = .{ .board = .{}, .rom = .{ .program = &.{}, .gfx = &.{}, .audio = &.{}, .qsound = &.{} } };
+    c.* = .{ .board = .{}, .rom = .{ .program = &.{}, .gfx = &.{}, .audio = &.{}, .qsound = &.{}, .oki = &.{} } };
     var cpu: scheduler.Cpu = .{};
 
     var diag = board.Diag{};
@@ -371,20 +371,27 @@ fn writeLog(io: std.Io, path: []const u8, bytes: []const u8) !void {
 const Sound = struct {
     h: std.hash.Wyhash = .init(0),
     frames: u64 = 0,
+    /// The loudest it got, which is the difference between a machine that is
+    /// playing and one that is running its driver into a chip nobody wired up.
+    peak: u32 = 0,
 
     fn drain(s: *Sound, m: *audio.Mixer) void {
-        while (m.pop()) |f| : (s.frames += 1) s.h.update(std.mem.asBytes(&f));
+        while (m.pop()) |f| : (s.frames += 1) {
+            s.h.update(std.mem.asBytes(&f));
+            s.peak = @max(s.peak, @max(@abs(@as(i32, f.l)), @abs(@as(i32, f.r))));
+        }
     }
 };
 
 fn report(c: *const cps.Cps, cpu: *const scheduler.Cpu, sound: *const Sound, frame: u32) void {
     // A copy, because finishing the hash consumes it and the run goes on.
     var h = sound.h;
-    std.debug.print("frame {d} hash={x:0>16} audio={x:0>16} samples={d}\n", .{
+    std.debug.print("frame {d} hash={x:0>16} audio={x:0>16} samples={d} peak={d}\n", .{
         frame,
         scheduler.hash(c, cpu),
         h.final(),
         sound.frames,
+        sound.peak,
     });
 }
 
@@ -495,11 +502,18 @@ fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8) void {
     romRow(ui, "PROGRAM", regions.get(.program), m.rom.program.len);
     romRow(ui, "GRAPHICS", regions.get(.gfx), m.rom.gfx.len);
     romRow(ui, "SOUND", regions.get(.audio), m.rom.audio.len);
-    romRow(ui, "SAMPLES", regions.get(.qsound), m.rom.qsound.len);
+    // The samples say which sound board this is, so the row names it: a QSound
+    // set has a DL-1425 sample ROM and a plain CPS-1 one has the M6295's.
+    const cps1 = m.b.sound() == .cps1;
+    romRow(ui, if (cps1) "ADPCM" else "SAMPLES", if (cps1)
+        regions.get(.oki)
+    else
+        regions.get(.qsound), if (cps1) m.rom.oki.len else m.rom.qsound.len);
     // The Kabuki key is the one thing in the board file that is a secret
     // rather than a setting: without it the Z80 runs garbage and the cabinet
-    // is silent, so whether there is one is worth a line of its own.
-    shell.cardRow(ui, "KABUKI", if (m.b.kabuki == null) .bad else .good, "{s}", .{
+    // is silent, so whether there is one is worth a line of its own. Only a
+    // QSound board has one to be missing.
+    if (!cps1) shell.cardRow(ui, "KABUKI", if (m.b.kabuki == null) .bad else .good, "{s}", .{
         if (m.b.kabuki == null) "NO KEY" else "KEY SET",
     });
     // Which CPS-B-21 batch this board is, as far as anything can tell from
