@@ -1,6 +1,6 @@
 //! The YM2151 (OPM): eight channels of four operators, and the two timers.
 //!
-//! Four operators, eight ways of wiring them (§7.5): one of them modulates the
+//! Four operators, eight ways of wiring them: one of them modulates the
 //! phase of the next, the last one out is heard, and which is which is the
 //! channel's algorithm. Each operator has its own envelope, its own detune and
 //! multiple, and its own share of the chip's one LFO, which bends both pitch
@@ -78,6 +78,37 @@ pub const key_shift = 3;
 /// is drawn.
 const alg_order = [ops_per_channel]u8{ 0, 2, 1, 3 };
 
+/// Where a channel's nth operator in algorithm order lives in the register file.
+fn slotOf(ch: usize, n: usize) usize {
+    return alg_order[n] * channels + ch;
+}
+
+// ------------------------------------------------------------- the algorithms
+
+/// What an operator's phase can be modulated by: the first operator's output
+/// this sample, the second's from the sample before (`Channel.delayed`), and
+/// the third's this sample. Nothing else is to hand when it is needed.
+const mod_first = 1;
+const mod_prev = 2;
+const mod_third = 4;
+
+/// A modulator contributes half its output to the phase it bends.
+const mod_shift = 1;
+
+/// The eight algorithms as the manual draws them: for operators two, three and
+/// four, what modulates each, and then which of the four are heard.
+const Algorithm = struct { mod: [ops_per_channel - 1]u3, heard: u4 };
+const algorithm = [8]Algorithm{
+    .{ .mod = .{ mod_first, mod_prev, mod_third }, .heard = 0b1000 },
+    .{ .mod = .{ 0, mod_first | mod_prev, mod_third }, .heard = 0b1000 },
+    .{ .mod = .{ 0, mod_prev, mod_first | mod_third }, .heard = 0b1000 },
+    .{ .mod = .{ mod_first, 0, mod_prev | mod_third }, .heard = 0b1000 },
+    .{ .mod = .{ mod_first, 0, mod_third }, .heard = 0b1010 },
+    .{ .mod = .{ mod_first, mod_first, mod_first }, .heard = 0b1110 },
+    .{ .mod = .{ 0, 0, 0 }, .heard = 0b1110 },
+    .{ .mod = .{ 0, 0, 0 }, .heard = 0b1111 },
+};
+
 // ------------------------------------------------------------- the tables
 
 /// The sine, as attenuation rather than amplitude, so that an operator's
@@ -106,8 +137,27 @@ const exp_table = blk: {
 };
 
 /// Attenuation is twelve bits, which is 16 halvings — past that an operator is
-/// silent.
+/// silent. The low eight index `exp_table`, the high four are whole halvings,
+/// and the table's own ten bits are shifted up to the fourteen an operator puts
+/// out.
 const att_max = 4095;
+const exp_fraction_bits = 8;
+const exp_fraction_mask = (1 << exp_fraction_bits) - 1;
+const exp_gain_shift = 2;
+
+/// A phase is twenty bits, of which the top ten name one of the sine's four
+/// quarters and where in it: the two highest say which quarter.
+const phase_bits = 20;
+const phase_mask = (1 << phase_bits) - 1;
+const sine_bits = 10;
+const sine_mask = (1 << sine_bits) - 1;
+const quarter_mask = (1 << (sine_bits - 2)) - 1;
+const sine_mirror = quarter_mask + 1;
+const sine_negate = sine_mirror << 1;
+
+/// How far the first operator's last two outputs come down before the
+/// channel's feedback depth is taken off that.
+const feedback_shift = 10;
 
 /// An envelope level is ten bits, 0 loud and 1023 silent, in steps of 3/32 dB.
 pub const level_max = 1023;
@@ -661,19 +711,28 @@ fn attenuationOf(y: *const Ym2151, ch: usize, op: *const Operator) i32 {
     return @min(att, level_max);
 }
 
+/// Attenuation back to amplitude: the low bits are one halving read out of the
+/// table, the high bits are the whole halvings, done as a shift.
+fn amplitude(att: u32) i32 {
+    const total = @min(att_max, att);
+    const fraction: u32 = exp_table[total & exp_fraction_mask];
+    return @intCast((fraction << exp_gain_shift) >> @intCast(total >> exp_fraction_bits));
+}
+
 /// One operator's output: a sine of its own phase, bent by whatever is
 /// modulating it, at whatever the envelope leaves of it. Fourteen bits signed.
 fn operatorOut(y: *Ym2151, ch: usize, slot: usize, mod: i32) i32 {
     const op = &y.op[slot];
     const att = attenuationOf(y, ch, op);
-    const phase = @as(i32, @intCast(op.phase >> 10)) +% mod;
-    op.phase = (op.phase +% incrementOf(y, ch, op)) & 0xfffff;
+    const phase = @as(i32, @intCast(op.phase >> (phase_bits - sine_bits))) +% mod;
+    op.phase = (op.phase +% incrementOf(y, ch, op)) & phase_mask;
 
-    const index: u32 = @as(u32, @bitCast(phase)) & 1023;
-    const quarter = if (index & 256 != 0) (index & 255) ^ 255 else index & 255;
-    const total = @min(att_max, @as(u32, log_sin[quarter]) + (@as(u32, @intCast(att)) << level_shift));
-    const mag: i32 = @intCast((@as(u32, exp_table[total & 255]) << 2) >> @intCast(total >> 8));
-    return if (index & 512 != 0) -mag else mag;
+    // The table is a quarter period; the chip mirrors it for the second
+    // quarter and negates both for the half below.
+    const index: u32 = @as(u32, @bitCast(phase)) & sine_mask;
+    const point = if (index & sine_mirror != 0) (index & quarter_mask) ^ quarter_mask else index & quarter_mask;
+    const mag = amplitude(@as(u32, log_sin[point]) + (@as(u32, @intCast(att)) << level_shift));
+    return if (index & sine_negate != 0) -mag else mag;
 }
 
 /// The noise operator: the same envelope, but the shift register's sign
@@ -681,8 +740,7 @@ fn operatorOut(y: *Ym2151, ch: usize, slot: usize, mod: i32) i32 {
 fn noiseOut(y: *Ym2151, slot: usize) i32 {
     const op = &y.op[slot];
     const att = attenuationOf(y, channels - 1, op);
-    const total = @min(att_max, @as(u32, @intCast(att)) << level_shift);
-    const mag: i32 = @intCast((@as(u32, exp_table[total & 255]) << 2) >> @intCast(total >> 8));
+    const mag = amplitude(@as(u32, @intCast(att)) << level_shift);
     return if (y.noise_lfsr & 1 != 0) mag else -mag;
 }
 
@@ -691,69 +749,38 @@ fn noiseOut(y: *Ym2151, slot: usize) i32 {
 /// algorithm changes under it.
 fn channelOut(y: *Ym2151, ch: usize) i32 {
     const c = y.ch[ch];
-    const slot = [ops_per_channel]usize{
-        alg_order[0] * channels + ch,
-        alg_order[1] * channels + ch,
-        alg_order[2] * channels + ch,
-        alg_order[3] * channels + ch,
-    };
+    const alg = algorithm[c.alg];
+    const prev = c.delayed;
 
-    const m1 = &y.op[slot[0]];
-    const fb: i32 = if (c.fb == 0) 0 else (m1.history[0] + m1.history[1]) >> @intCast(10 - @as(u5, c.fb));
-    const o1 = operatorOut(y, ch, slot[0], fb);
-    m1.history[1] = m1.history[0];
-    m1.history[0] = o1;
-
-    var o2: i32 = undefined;
-    var o3: i32 = undefined;
-    var o4: i32 = undefined;
-    const was = c.delayed;
-    switch (c.alg) {
-        0 => {
-            o2 = operatorOut(y, ch, slot[1], o1 >> 1);
-            o3 = operatorOut(y, ch, slot[2], was >> 1);
-            o4 = operatorOut(y, ch, slot[3], o3 >> 1);
-        },
-        1 => {
-            o2 = operatorOut(y, ch, slot[1], 0);
-            o3 = operatorOut(y, ch, slot[2], (o1 + was) >> 1);
-            o4 = operatorOut(y, ch, slot[3], o3 >> 1);
-        },
-        2 => {
-            o2 = operatorOut(y, ch, slot[1], 0);
-            o3 = operatorOut(y, ch, slot[2], was >> 1);
-            o4 = operatorOut(y, ch, slot[3], (o1 + o3) >> 1);
-        },
-        3 => {
-            o2 = operatorOut(y, ch, slot[1], o1 >> 1);
-            o3 = operatorOut(y, ch, slot[2], 0);
-            o4 = operatorOut(y, ch, slot[3], (was + o3) >> 1);
-        },
-        4 => {
-            o2 = operatorOut(y, ch, slot[1], o1 >> 1);
-            o3 = operatorOut(y, ch, slot[2], 0);
-            o4 = operatorOut(y, ch, slot[3], o3 >> 1);
-        },
-        5 => {
-            o2 = operatorOut(y, ch, slot[1], o1 >> 1);
-            o3 = operatorOut(y, ch, slot[2], o1 >> 1);
-            o4 = operatorOut(y, ch, slot[3], o1 >> 1);
-        },
-        6, 7 => {
-            o2 = operatorOut(y, ch, slot[1], 0);
-            o3 = operatorOut(y, ch, slot[2], 0);
-            o4 = operatorOut(y, ch, slot[3], 0);
-        },
+    var out: [ops_per_channel]i32 = @splat(0);
+    out[0] = feedbackOut(y, ch, c.fb);
+    for (alg.mod, 1..) |mod, i| {
+        var phase: i32 = 0;
+        if (mod & mod_first != 0) phase += out[0];
+        if (mod & mod_prev != 0) phase += prev;
+        if (mod & mod_third != 0) phase += out[2];
+        out[i] = operatorOut(y, ch, slotOf(ch, i), phase >> mod_shift);
     }
-    y.ch[ch].delayed = o2;
-    if (ch == channels - 1 and y.noise_on) o4 = noiseOut(y, slot[3]);
+    y.ch[ch].delayed = out[1];
 
-    return switch (c.alg) {
-        0, 1, 2, 3 => o4,
-        4 => o2 + o4,
-        5, 6 => o2 + o3 + o4,
-        else => o1 + o2 + o3 + o4,
-    };
+    if (ch == channels - 1 and y.noise_on) out[3] = noiseOut(y, slotOf(ch, 3));
+
+    var sum: i32 = 0;
+    for (out, 0..) |o, i| {
+        if (alg.heard & (@as(u4, 1) << @intCast(i)) != 0) sum += o;
+    }
+    return sum;
+}
+
+/// The first operator, the only one that can modulate itself: the feedback is
+/// the sum of its last two outputs, which is why it keeps a history at all.
+fn feedbackOut(y: *Ym2151, ch: usize, fb: u3) i32 {
+    const op = &y.op[slotOf(ch, 0)];
+    const mod: i32 = if (fb == 0) 0 else (op.history[0] + op.history[1]) >> @intCast(feedback_shift - @as(u5, fb));
+    const out = operatorOut(y, ch, slotOf(ch, 0), mod);
+    op.history[1] = op.history[0];
+    op.history[0] = out;
+    return out;
 }
 
 // ------------------------------------------------------------- the timers

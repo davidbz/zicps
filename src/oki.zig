@@ -7,8 +7,8 @@
 //! ADPCM from there, one nibble per output sample, until it runs out.
 //!
 //! Its sample rate is set by pin 7 rather than by a register: the CPS-1 sound
-//! board wires that pin to a Z80 port (§7.5), so a game may change it while it
-//! runs, and the scheduler asks which divider is in effect every line.
+//! board wires that pin to a Z80 port, so a game may change it while it runs,
+//! and the scheduler asks which divider is in effect every line.
 
 const std = @import("std");
 
@@ -18,7 +18,11 @@ pub const voices = 4;
 /// which the first six are a 18-bit start and stop address.
 pub const phrase_bytes = 8;
 pub const phrases = 128;
+pub const addr_bytes = 3;
 pub const addr_mask = 0x3ffff;
+
+/// A phrase is a run of bytes and the chip plays each of them twice.
+const nibbles_per_byte = 2;
 
 /// A phrase number arrives with this bit set; anything else is the second half
 /// of a command, or a stop on its own.
@@ -38,7 +42,13 @@ pub const divider_low = 165;
 /// Attenuation per step of the command's low nibble, as a numerator over 32:
 /// 0 dB down to -24 dB in eight steps, and silence past that.
 const volume_table = [16]i32{ 32, 22, 16, 11, 8, 6, 4, 3, 2, 0, 0, 0, 0, 0, 0, 0 };
-pub const volume_shift = 5;
+pub const volume_mask = 0x0f;
+const volume_shift = 5;
+
+/// What takes a voice from twelve bits at that attenuation to the sixteen the
+/// board mixes in: down by the attenuation's denominator, up by the four bits
+/// of headroom between the two widths.
+const output_shift = volume_shift - (16 - 12);
 
 /// The Dialogic step table: 49 sizes, each a tenth larger than the last, and
 /// the index into it moves by this much per nibble. Every ADPCM bug lives in
@@ -137,57 +147,81 @@ pub fn read(o: *const Oki) u8 {
 pub fn write(o: *Oki, value: u8) void {
     if (o.latched) |phrase| {
         o.latched = null;
-        for (&o.voice, 0..) |*v, i| {
-            if (value & (@as(u8, 1) << @intCast(play_shift + i)) == 0) continue;
-            // A voice already playing keeps what it is playing: the chip has
-            // one address counter per voice and the command does not reload it.
-            if (v.playing) continue;
-            const base = @as(u32, phrase) * phrase_bytes;
-            const start = address(o, base);
-            const stop = address(o, base + 3);
-            if (start >= stop) continue;
-            v.* = .{
-                .playing = true,
-                .at = start,
-                .high_nibble = true,
-                .left = 2 * (stop - start + 1),
-                .volume = volume_table[value & 0x0f],
-            };
-        }
-        return;
+        return play(o, phrase, value);
     }
     if (value & phrase_flag != 0) {
         o.latched = @truncate(value);
         return;
     }
+    silence(o, value);
+}
+
+/// The second half of a play command: which voices the latched phrase is keyed
+/// on, and how loud.
+fn play(o: *Oki, phrase: u7, value: u8) void {
     for (&o.voice, 0..) |*v, i| {
-        if (value & (@as(u8, 1) << @intCast(stop_shift + i)) != 0) v.playing = false;
+        if (!named(value, play_shift, i)) continue;
+        // A voice already playing keeps what it is playing: the chip has one
+        // address counter per voice and the command does not reload it.
+        if (v.playing) continue;
+        v.* = keyed(o, phrase, volume_table[value & volume_mask]) orelse continue;
     }
 }
 
-/// One output sample: one nibble out of every playing voice, summed. The
-/// result is the chip's twelve bits scaled by the voice's attenuation, which
-/// puts a voice at full volume at the top of the sixteen-bit range.
-pub fn sample(o: *Oki) i16 {
+/// A command with no phrase latched before it silences the voices it names.
+fn silence(o: *Oki, value: u8) void {
+    for (&o.voice, 0..) |*v, i| {
+        if (named(value, stop_shift, i)) v.playing = false;
+    }
+}
+
+fn named(value: u8, shift: u3, voice: usize) bool {
+    return value & (@as(u8, 1) << @intCast(shift + voice)) != 0;
+}
+
+/// A voice set on a phrase, or none at all if the table entry is empty — an
+/// unprogrammed one runs backwards, and the chip plays nothing rather than
+/// walking off through the ROM.
+fn keyed(o: *const Oki, phrase: u7, volume: i32) ?Voice {
+    const entry = @as(u32, phrase) * phrase_bytes;
+    const start = address(o, entry);
+    const end = address(o, entry + addr_bytes);
+    if (start >= end) return null;
+    return .{
+        .playing = true,
+        .at = start,
+        .high_nibble = true,
+        .left = nibbles_per_byte * (end - start + 1),
+        .volume = volume,
+    };
+}
+
+/// One output sample: one nibble out of every playing voice, summed. A voice at
+/// full volume fills the sixteen bits on its own, and four of them are four
+/// times that — the chip has no limiter, so this is wider than a sample and the
+/// board's mixer is what spends the headroom.
+pub fn sample(o: *Oki) i32 {
     var sum: i32 = 0;
     for (&o.voice) |*v| {
         if (!v.playing) continue;
-        const byte = romByte(o, v.at);
-        const nibble: u4 = if (v.high_nibble) @truncate(byte >> 4) else @truncate(byte);
-        if (v.high_nibble) {
-            v.high_nibble = false;
-        } else {
-            v.high_nibble = true;
-            v.at +%= 1;
-        }
-        v.left -= 1;
-        if (v.left == 0) v.playing = false;
-
-        v.signal = std.math.clamp(v.signal + diff(step_table[@intCast(v.index)], nibble), signal_min, signal_max);
-        v.index = std.math.clamp(v.index + index_shift[nibble & 7], 0, steps - 1);
-        sum += v.signal * v.volume;
+        sum += voiceOut(o, v);
     }
-    return @intCast(std.math.clamp(sum >> 1, std.math.minInt(i16), std.math.maxInt(i16)));
+    return sum >> output_shift;
+}
+
+/// One nibble out of one playing voice, at that voice's attenuation.
+fn voiceOut(o: *const Oki, v: *Voice) i32 {
+    const byte = romByte(o, v.at);
+    const nibble: u4 = if (v.high_nibble) @truncate(byte >> 4) else @truncate(byte);
+    v.high_nibble = !v.high_nibble;
+    if (v.high_nibble) v.at +%= 1;
+
+    v.left -= 1;
+    if (v.left == 0) v.playing = false;
+
+    v.signal = std.math.clamp(v.signal + diff(step_table[@intCast(v.index)], nibble), signal_min, signal_max);
+    v.index = std.math.clamp(v.index + index_shift[nibble & 7], 0, steps - 1);
+    return v.signal * v.volume;
 }
 
 // ------------------------------------------------------------- tests
@@ -289,4 +323,33 @@ test "pin 7 picks the divider" {
     try testing.expectEqual(@as(u32, divider_high), divider(&o));
     o.pin7 = false;
     try testing.expectEqual(@as(u32, divider_low), divider(&o));
+}
+
+test "voices sum without saturating one another" {
+    var buf: [phrases * phrase_bytes + 16]u8 = undefined;
+    // Eight of the biggest positive steps walk one voice to the top of its
+    // twelve bits, which is where a second voice has to still have somewhere
+    // to go.
+    buildRom(&[_]u4{ 7, 7, 7, 7, 7, 7, 7, 7 }, &buf);
+
+    var one = Oki{};
+    attach(&one, &buf);
+    write(&one, phrase_flag | 1);
+    write(&one, 1 << play_shift);
+
+    var both = Oki{};
+    attach(&both, &buf);
+    write(&both, phrase_flag | 1);
+    write(&both, (1 << play_shift) | (1 << (play_shift + 1)));
+
+    var loudest: i32 = 0;
+    for (0..8) |_| {
+        const single: i32 = sample(&one);
+        const pair: i32 = sample(&both);
+        try testing.expectEqual(single * 2, pair);
+        loudest = @max(loudest, pair);
+    }
+    // And the pair really did go past what one voice on its own can reach: the
+    // headroom is the board mixer's to spend, not this chip's.
+    try testing.expect(loudest > std.math.maxInt(i16));
 }

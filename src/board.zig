@@ -27,7 +27,6 @@ pub const cps_b_bytes = 0x40;
 /// The six things the video chip draws. The order is the bit order of a gfx
 /// range's type mask.
 pub const Layer = enum(u3) { sprites, scroll1, scroll2, scroll3, stars };
-pub const layer_count = @typeInfo(Layer).@"enum".fields.len;
 
 /// What the layer-enable masks are in, which is not `Layer`: the object list
 /// has no enable bit of its own and each starfield has one.
@@ -66,10 +65,9 @@ pub const Kabuki = struct {
 /// Which chip on the board a file's bytes belong to.
 pub const Region = enum { program, gfx, audio, qsound, oki };
 pub const region_count = @typeInfo(Region).@"enum".fields.len;
-/// The two sound boards of §7.5: a Z80 behind a Kabuki with the DL-1425
-/// The two sound boards of �7.5: a Z80 behind a Kabuki with the DL-1425
-/// beside it, or a plain Z80 with a YM2151 and an OKI M6295. `none` is a set
-/// with no sound ROM at all, which only the in-repo test ROM is.
+/// The two sound boards: a Z80 behind a Kabuki with the DL-1425 beside it, or a
+/// plain Z80 with a YM2151 and an OKI M6295. `none` is a set with no sound ROM
+/// at all, which only the in-repo test ROM is.
 pub const Sound = enum { none, qsound, cps1 };
 
 /// A tile's attribute word picks one of four priority masks, so the PAL decodes
@@ -175,9 +173,9 @@ pub const Board = struct {
         return b.ranges[0..b.range_count];
     }
 
-    /// Which of the two sound boards this set came with (§7.5). Nothing in a
-    /// board file says so directly, and nothing needs to: no CPS-1 set has both
-    /// a QSound sample ROM and an OKI one, so the samples name the board.
+    /// Which of the two sound boards this set came with. Nothing in a board file
+    /// says so directly, and nothing needs to: no CPS-1 set has both a QSound
+    /// sample ROM and an OKI one, so the samples name the board.
     pub fn sound(b: *const Board) Sound {
         var found = Sound.none;
         for (b.romList()) |r| switch (r.region) {

@@ -39,9 +39,9 @@ pub const cps_a_lo = 0x800100;
 pub const cps_a_hi = 0x80013f;
 pub const cps_b_lo = 0x800140;
 pub const cps_b_hi = 0x80017f;
-/// The two command latches of a plain CPS-1 board (§7.5). A QSound board has
-/// shared RAM instead and never touches these; this board has no shared RAM at
-/// all, and a byte posted here is the whole of what the 68000 tells the Z80.
+/// The two command latches of a plain CPS-1 board. A QSound board has shared
+/// RAM instead and never touches these; this board has no shared RAM at all,
+/// and a byte posted here is the whole of what the 68000 tells the Z80.
 pub const latch0_lo = 0x800180;
 pub const latch0_hi = 0x800187;
 pub const latch1_lo = 0x800188;
@@ -343,7 +343,8 @@ pub const Cps = struct {
     oki_debt: u64 = 0,
     /// The last sample the M6295 finished, held until it finishes another: it
     /// runs at a seventh of the OPM's rate and the mix happens at the OPM's.
-    oki_out: i16 = 0,
+    /// Wider than a sample, because the chip sums four voices without a limiter.
+    oki_out: i32 = 0,
 
     // The 68000 core reaches its bus by method call. The functions stay free.
     pub const read8 = file.read8;
