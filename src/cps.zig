@@ -361,7 +361,7 @@ pub fn read16(c: *Cps, addr: u24) u16 {
         in1_lo...in1_hi => in1(c),
         in0_lo...in0_hi => highByteWide(if (slot(addr) == in0_slot) in0(c) else dsw(c, slot(addr))),
         cps_a_lo...cps_a_hi => video.readA(&c.v, @truncate(addr - cps_a_lo)),
-        cps_b_lo...cps_b_hi => video.readB(&c.v, &c.board, @truncate(addr - cps_b_lo)),
+        cps_b_lo...cps_b_hi => cboard(c, @truncate(addr - cps_b_lo)),
         gfxram_lo...gfxram_hi => peek(&c.v.gfxram, addr - gfxram_lo),
         // The sample ROM seen a byte at a time through the sound board: a
         // protection read on the boards that use it, harmless on those that
@@ -375,7 +375,7 @@ pub fn read16(c: *Cps, addr: u24) u16 {
         // word is nothing at all.
         eeprom_lo...eeprom_hi => open_bus & ~@as(u16, 1) | c.eeprom.read(),
         ram_lo...ram_hi => peek(&c.ram, addr - ram_lo),
-        else => cboard(c, addr),
+        else => open_bus,
     };
 }
 
@@ -419,19 +419,20 @@ fn in1(c: *const Cps) u16 {
     return ~(low | high << 8);
 }
 
-/// The extra controls a C-board carries. A CPS-1.5 board has them at a fixed
-/// address; a plain CPS-1 board's C-board decodes them into the 0x800000
-/// window instead, at an offset that moves from board to board and that the
-/// board file carries. Without this a six-button game reads its kicks as an
-/// unpressed panel and only ever punches.
+/// The CPS-B window, where a plain CPS-1 board's C-board also decodes its
+/// extra controls: a register the board file names, inside the register file
+/// and not in the input window at all. A CPS-1.5 board has them on their own
+/// address instead. Without this a six-button game finds nothing where its
+/// kicks are and only ever punches.
 ///
-/// ponytail: the same pins are player 3 on a three-player cabinet's C-board,
-/// and this hands those games player 1's buttons 4 to 6. Split it when a third
-/// player is worth having.
-fn cboard(c: *const Cps, addr: u24) u16 {
-    const off = c.board.in2_offset orelse return open_bus;
-    if (addr == in1_lo + @as(u24, off)) return in2(c);
-    return open_bus;
+/// ponytail: the same register is player 3 on a three-player cabinet, and this
+/// hands those games player 1's buttons 4 to 6 rather than the nothing they
+/// used to read. Split it when a third player is worth having.
+fn cboard(c: *Cps, offset: u8) u16 {
+    if (c.board.in2_offset) |off| {
+        if (off == offset) return in2(c);
+    }
+    return video.readB(&c.v, &c.board, offset);
 }
 
 fn in2(c: *const Cps) u16 {
@@ -569,13 +570,14 @@ test "controls are wired to ground, so a pressed button reads as a zero" {
     // Button 6 is on IN2 instead, four bits up for player 2.
     try testing.expectEqual(@as(u16, ~@as(u16, 0x04)), read16(&c, in2_lo));
 
-    // A plain CPS-1 board reads the same bits where its C-board decodes them,
-    // which is where the board file says and nowhere else.
-    try testing.expectEqual(@as(u16, 0xffff), read16(&c, in1_lo + 0x36));
+    // A plain CPS-1 board reads the same bits from the CPS-B register its
+    // board file names, and from no other register in that window.
     c.board.in2_offset = 0x36;
-    try testing.expectEqual(@as(u16, ~@as(u16, 0x04)), read16(&c, in1_lo + 0x36));
-    try testing.expectEqual(@as(u8, 0xfb), read8(&c, in1_lo + 0x37));
-    try testing.expectEqual(@as(u16, 0xffff), read16(&c, in1_lo + 0x3c));
+    try testing.expectEqual(@as(u16, ~@as(u16, 0x04)), read16(&c, cps_b_lo + 0x36));
+    try testing.expectEqual(@as(u8, 0xfb), read8(&c, cps_b_lo + 0x37));
+    // Every other register in that window is still the register file.
+    write16(&c, cps_b_lo + 0x34, 0x1234);
+    try testing.expectEqual(@as(u16, 0x1234), read16(&c, cps_b_lo + 0x34));
     c.board.in2_offset = null;
 
     c.inputs.panel = Panel.coin1.mask() | Panel.start2.mask();

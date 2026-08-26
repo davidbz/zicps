@@ -167,10 +167,10 @@ pub fn readB(v: *const Video, b: *const board.Board, offset: u8) u16 {
     if (offset >= board.cps_b_bytes) return open_bus;
     if (same(b.id_offset, offset)) return b.id_value;
 
-    // The extra controls a C-board maps into this window on a three- or
-    // four-player cabinet. Nothing here is wired to a panel, and an input
-    // nobody is pressing reads high — which the last value written to the
-    // register is not, and a game polling player three would believe it.
+    // The extra controls a C-board maps into this window. The bus serves the
+    // six-button register itself; player 3 and player 4 are wired to nothing,
+    // and an input nobody is pressing reads high — which the last value
+    // written to the register is not, and a game polling them would believe it.
     if (same(b.in2_offset, offset) or same(b.in3_offset, offset)) return open_bus;
 
     const product = multiply(v, b);
