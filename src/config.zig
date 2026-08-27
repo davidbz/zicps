@@ -27,6 +27,13 @@ pub const Buttons = enum { three, six };
 pub const max_recent = 8;
 pub const max_recent_path = 256;
 
+/// Every key with a fixed name. A binding's name is the action's, so it is
+/// matched after these and not from here.
+const Key = enum { version, scale, fullscreen, scanlines, audio, volume, buttons, recent };
+
+const bind_prefix = "key.";
+const version_text = std.fmt.comptimePrint("{d}", .{version});
+
 pub const Config = struct {
     scale: u8 = 3,
     fullscreen: bool = false,
@@ -50,29 +57,27 @@ pub const Config = struct {
             const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
             const key = std.mem.trim(u8, line[0..eq], " \t");
             const val = std.mem.trim(u8, line[eq + 1 ..], " \t");
-            if (std.mem.eql(u8, key, "version")) {
-                if (!std.mem.eql(u8, val, std.fmt.comptimePrint("{d}", .{version}))) return .{};
-                seen_version = true;
-            } else if (std.mem.eql(u8, key, "scale")) {
-                cfg.scale = std.math.clamp(parseInt(u8, val) orelse cfg.scale, min_scale, max_scale);
-            } else if (std.mem.eql(u8, key, "fullscreen")) {
-                cfg.fullscreen = parseBool(val) orelse cfg.fullscreen;
-            } else if (std.mem.eql(u8, key, "scanlines")) {
-                cfg.scanlines = parseBool(val) orelse cfg.scanlines;
-            } else if (std.mem.eql(u8, key, "audio")) {
-                cfg.audio = parseBool(val) orelse cfg.audio;
-            } else if (std.mem.eql(u8, key, "volume")) {
-                cfg.volume = @min(max_volume, parseInt(u8, val) orelse cfg.volume);
-            } else if (std.mem.eql(u8, key, "buttons")) {
-                cfg.buttons = std.meta.stringToEnum(Buttons, val) orelse cfg.buttons;
-            } else if (std.mem.eql(u8, key, "recent")) {
+            const what = std.meta.stringToEnum(Key, key) orelse {
+                bindKey(&cfg, key, val);
+                continue;
+            };
+            switch (what) {
+                .version => {
+                    if (!std.mem.eql(u8, val, version_text)) return .{};
+                    seen_version = true;
+                },
+                .scale => cfg.scale = std.math.clamp(parseInt(u8, val) orelse cfg.scale, min_scale, max_scale),
+                .fullscreen => cfg.fullscreen = parseBool(val) orelse cfg.fullscreen,
+                .scanlines => cfg.scanlines = parseBool(val) orelse cfg.scanlines,
+                .audio => cfg.audio = parseBool(val) orelse cfg.audio,
+                .volume => cfg.volume = @min(max_volume, parseInt(u8, val) orelse cfg.volume),
+                .buttons => cfg.buttons = std.meta.stringToEnum(Buttons, val) orelse cfg.buttons,
                 // The file is written most-recent-first, so it is read in
                 // order into the next free slot and nothing is moved.
-                const at = cfg.recentCount();
-                if (at < max_recent and val.len != 0 and val.len < max_recent_path) set(&cfg.recent[at], val);
-            } else if (std.mem.startsWith(u8, key, "key.")) {
-                const action = std.meta.stringToEnum(input.Action, key["key.".len..]) orelse continue;
-                cfg.keys[@intFromEnum(action)] = input.keyCode(val) orelse continue;
+                .recent => {
+                    const at = cfg.recentCount();
+                    if (at < max_recent and val.len != 0 and val.len < max_recent_path) set(&cfg.recent[at], val);
+                },
             }
         }
         // A file without a version line is from nowhere we know.
@@ -93,7 +98,7 @@ pub const Config = struct {
         var buf: [input.max_key_name]u8 = undefined;
         for (std.enums.values(input.Action)) |action| {
             const key = cfg.keys[@intFromEnum(action)];
-            try w.print("key.{s} = {s}\n", .{ @tagName(action), input.keyName(key, &buf) });
+            try w.print(bind_prefix ++ "{s} = {s}\n", .{ @tagName(action), input.keyName(key, &buf) });
         }
     }
 
@@ -134,6 +139,14 @@ pub const Config = struct {
 fn set(slot: *[max_recent_path]u8, path: []const u8) void {
     slot.* = @splat(0);
     @memcpy(slot[0..path.len], path);
+}
+
+/// `key.<action> = <name>`. A name nothing answers to leaves the binding as it
+/// was: an option file is allowed to be from a build that named one differently.
+fn bindKey(cfg: *Config, key: []const u8, val: []const u8) void {
+    if (!std.mem.startsWith(u8, key, bind_prefix)) return;
+    const action = std.meta.stringToEnum(input.Action, key[bind_prefix.len..]) orelse return;
+    cfg.keys[@intFromEnum(action)] = input.keyCode(val) orelse return;
 }
 
 fn parseInt(comptime T: type, val: []const u8) ?T {

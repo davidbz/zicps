@@ -231,7 +231,7 @@ pub const Ui = struct {
     }
 
     /// Whether a set is in, as the menu can tell: the board card is built when
-    /// one loads and empty until then (§5.2), which is already what the bar
+    /// one loads and empty until then, which is already what the bar
     /// reads to choose between a name and NO SET.
     fn hasSet(ui: *const Ui) bool {
         return ui.card_n != 0;
@@ -381,9 +381,7 @@ fn menuKeys(ui: *Ui, cfg: *Config) Request {
     if (ui.page.isSlots()) return slotKeys(ui);
 
     const items = ui.items();
-    if (repeat(rl.KEY_DOWN)) ui.sel = (ui.sel + 1) % items.len;
-    if (repeat(rl.KEY_UP)) ui.sel = (ui.sel + items.len - 1) % items.len;
-    if (hoveredRow(ui.sel, items.len)) |row| ui.sel = row;
+    ui.sel = walkList(ui.sel, items.len);
 
     var delta: i32 = 0;
     if (repeat(rl.KEY_RIGHT)) delta = 1;
@@ -394,15 +392,19 @@ fn menuKeys(ui: *Ui, cfg: *Config) Request {
         if (ui.page == .root) ui.open = false else ui.goto(.root);
         return .none;
     }
-    const clicked = rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT) and mouseRow(items.len) != null;
-    if (!rl.IsKeyPressed(rl.KEY_ENTER) and !clicked) return .none;
+    if (!chose(items.len)) return .none;
 
     if (needsSet(items[ui.sel].act) and !ui.hasSet()) {
         ui.status("load a set first", .{});
         return .none;
     }
 
-    return switch (items[ui.sel].act) {
+    return activate(ui, cfg, items[ui.sel].act);
+}
+
+/// What Enter does to the row it was pressed on.
+fn activate(ui: *Ui, cfg: *Config, act: Act) Request {
+    return switch (act) {
         .goto => |page| {
             // An empty list is a page with nothing on it and no way to tell
             // that from a bug, so it says so and stays where it is.
@@ -432,23 +434,20 @@ fn menuKeys(ui: *Ui, cfg: *Config) Request {
             return .none;
         },
         // Enter on a value cycles it forward; left/right walk it either way.
-        else => |act| adjust(ui, cfg, act, 1),
+        else => adjust(ui, cfg, act, 1),
     };
 }
 
 /// The save and load pages are the same list of slots twice; which page it is
 /// decides what Enter does with the row.
 fn slotKeys(ui: *Ui) Request {
-    if (repeat(rl.KEY_DOWN)) ui.slot_sel = (ui.slot_sel + 1) % state_slots;
-    if (repeat(rl.KEY_UP)) ui.slot_sel = (ui.slot_sel + state_slots - 1) % state_slots;
-    if (hoveredRow(ui.slot_sel, state_slots)) |row| ui.slot_sel = row;
+    ui.slot_sel = walkList(ui.slot_sel, state_slots);
 
     if (rl.IsKeyPressed(rl.KEY_ESCAPE)) {
         ui.goto(.root);
         return .none;
     }
-    const clicked = rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT) and mouseRow(state_slots) != null;
-    if (!rl.IsKeyPressed(rl.KEY_ENTER) and !clicked) return .none;
+    if (!chose(state_slots)) return .none;
 
     const saving = ui.page == .save_state;
     // Loading an empty slot is nothing at all, and a machine that quietly does
@@ -472,16 +471,13 @@ fn recentKeys(ui: *Ui, cfg: *Config) Request {
         ui.goto(.root);
         return .none;
     }
-    if (repeat(rl.KEY_DOWN)) ui.sel = (ui.sel + 1) % n;
-    if (repeat(rl.KEY_UP)) ui.sel = (ui.sel + n - 1) % n;
-    if (hoveredRow(ui.sel, n)) |row| ui.sel = row;
+    ui.sel = walkList(ui.sel, n);
 
     if (rl.IsKeyPressed(rl.KEY_ESCAPE)) {
         ui.goto(.root);
         return .none;
     }
-    const clicked = rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT) and mouseRow(n) != null;
-    if (!rl.IsKeyPressed(rl.KEY_ENTER) and !clicked) return .none;
+    if (!chose(n)) return .none;
 
     // Copied out of the config and into `ui.path` because loading rewrites the
     // list the row was pointing into.
@@ -533,6 +529,22 @@ fn stepped(cfg: *const Config, action: Action) bool {
 /// `IsKeyPressed` alone does not give.
 fn repeat(key: c_int) bool {
     return rl.IsKeyPressed(key) or rl.IsKeyPressedRepeat(key);
+}
+
+/// Where the selection goes when the arrows or the pointer move it: one row
+/// either way, wrapping at both ends. Every list on every page moves the same;
+/// only what its rows mean differs.
+fn walkList(sel: usize, n: usize) usize {
+    var at = sel;
+    if (repeat(rl.KEY_DOWN)) at = (at + 1) % n;
+    if (repeat(rl.KEY_UP)) at = (at + n - 1) % n;
+    return hoveredRow(at, n) orelse at;
+}
+
+/// Enter or a click on a row: the two ways of choosing the row a list is on.
+fn chose(n: usize) bool {
+    return rl.IsKeyPressed(rl.KEY_ENTER) or
+        (rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT) and mouseRow(n) != null);
 }
 
 // --------------------------------------------------------------- browser
@@ -614,13 +626,13 @@ fn browserKeys(ui: *Ui) Request {
     }
     // A directory is both a place to go and a set to load, so Enter walks into
     // it and Space loads it. A zip is only ever a set, and takes either key.
-    const clicked = rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT) and mouseRow(b.n) != null;
-    const enter = rl.IsKeyPressed(rl.KEY_ENTER) or clicked;
+    const enter = chose(b.n);
     const load = rl.IsKeyPressed(rl.KEY_SPACE);
     if (!enter and !load) return .none;
 
     // ".." is a place and nothing else, whichever key was pressed.
-    if (load and b.order[b.sel] != Browser.parent or !b.isDir(b.sel)) {
+    const to_parent = b.order[b.sel] == Browser.parent;
+    if (!b.isDir(b.sel) or (load and !to_parent)) {
         const chosen = copyPath(&ui.path, b.path(b.sel));
         ui.open = false;
         b.unload();
@@ -697,6 +709,12 @@ const glow = rl.Color{ .r = 255, .g = 210, .b = 60, .a = 70 };
 /// A cabinet's marquee is lit from behind, so the title is warm rather than
 /// the flat white of the readouts beside it.
 const marquee_ink = rl.Color{ .r = 255, .g = 238, .b = 198, .a = 255 };
+/// The selected row's wash, and how far above the text it starts so that a
+/// letter's ascender is not the top edge of the band behind it.
+const selection = rl.Color{ .r = 255, .g = 255, .b = 255, .a = 30 };
+const row_lift = 2;
+/// Behind the idle screen's caption, so it stays readable over the snow.
+const caption_bg = rl.Color{ .r = 0, .g = 0, .b = 0, .a = 160 };
 
 /// Below this the default raylib font stops being legible at all, so a 1x
 /// window gets a menu that overflows rather than one that cannot be read.
@@ -866,7 +884,7 @@ fn drawCardRow(row: *const Row, x: c_int, w: c_int, line: c_int, pad: c_int, sma
 }
 fn drawRow(y: c_int, selected: bool) void {
     if (!selected) return;
-    rl.DrawRectangle(0, y - 2, rl.GetScreenWidth(), rowHeight(), .{ .r = 255, .g = 255, .b = 255, .a = 30 });
+    rl.DrawRectangle(0, y - row_lift, rl.GetScreenWidth(), rowHeight(), selection);
 }
 
 fn valueText(act: Act, cfg: *const Config, ui: *const Ui, buf: []u8) ?[:0]const u8 {
@@ -1381,7 +1399,7 @@ pub fn drawIdlePrompt() void {
     const w = rl.MeasureText(text, fs);
     const x = @divTrunc(rl.GetScreenWidth() - w, 2);
     const y = @divTrunc(rl.GetScreenHeight() - barHeight(), 2) - fs;
-    rl.DrawRectangle(x - half(fs), y - half(half(fs)), w + fs, rowHeight(), .{ .r = 0, .g = 0, .b = 0, .a = 160 });
+    rl.DrawRectangle(x - half(fs), y - half(half(fs)), w + fs, rowHeight(), caption_bg);
     rl.DrawText(text, x, y, fs, fg);
 }
 

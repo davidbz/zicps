@@ -1,4 +1,4 @@
--- Writes the video state differential's dump out of MAME (§10).
+-- Writes the video state differential's dump out of MAME.
 --
 -- At a chosen frame it saves graphics RAM, the CPS-A and CPS-B register files
 -- and the frame number into one `.vdump`, and takes MAME's own snapshot of the

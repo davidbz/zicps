@@ -173,6 +173,20 @@ fn runSound(c: *cps.Cps) void {
     }
 }
 
+/// The sound Z80's `owed` cycles, less whatever the last line overran by, with
+/// this line's overrun carried forward the same way the 68000's is. Both boards
+/// run their Z80 this way; only what they owe it differs.
+fn runZ80(c: *cps.Cps, owed: u64) void {
+    const s = &c.sound;
+    const budget = owed -| c.sound_over;
+    const start = s.cpu.cycles;
+    while (s.cpu.cycles -% start < budget) {
+        soundboard.interrupt(s);
+        soundboard.step(s);
+    }
+    c.sound_over = c.sound_over + (s.cpu.cycles -% start) - owed;
+}
+
 /// The QSound board: a Z80 on a clock that divides the line evenly, an
 /// interrupt off a divider, and one chip.
 fn runQsound(c: *cps.Cps) void {
@@ -183,13 +197,7 @@ fn runQsound(c: *cps.Cps) void {
         s.int_pending = true;
     }
 
-    const budget = sound_per_line -| c.sound_over;
-    const start = s.cpu.cycles;
-    while (s.cpu.cycles -% start < budget) {
-        soundboard.interrupt(s);
-        soundboard.step(s);
-    }
-    c.sound_over = c.sound_over + (s.cpu.cycles -% start) - sound_per_line;
+    runZ80(c, sound_per_line);
 
     // ponytail: the chip is sampled after the Z80 has had the whole line
     // rather than in step with it, so a register written mid-line takes effect
@@ -212,13 +220,7 @@ fn runCps1(c: *cps.Cps) void {
     const owed = c.sound_debt / reference_hz;
     c.sound_debt -= owed * reference_hz;
 
-    const budget = owed -| c.sound_over;
-    const start = s.cpu.cycles;
-    while (s.cpu.cycles -% start < budget) {
-        soundboard.interrupt(s);
-        soundboard.step(s);
-    }
-    c.sound_over = c.sound_over + (s.cpu.cycles -% start) - owed;
+    runZ80(c, owed);
 
     // ponytail: the M6295 is stepped a whole line at a time, which at 7.6 kHz
     // is one sample or none — so a phrase starts up to a line late. Fold it
@@ -350,6 +352,33 @@ test "a frame runs a frame's worth of cycles, and the remainder carries" {
     const total = cpu.cycles - start;
     try testing.expect(total >= want * 11);
     try testing.expect(total - want * 11 < cpu_per_line);
+}
+
+test "the sound Z80's line is a budget and a debt, whatever the budget" {
+    var rom = spinRom();
+    var c = spinning(&rom);
+    // JR -2, twelve cycles: the Z80 spinning on itself, so nothing but the
+    // budget decides how far it gets in a line.
+    const jr_cycles = 12;
+    const z80 = [_]u8{ 0x18, 0xfe };
+    soundboard.load(&c.sound, .qsound, &z80, &.{}, null);
+    soundboard.reset(&c.sound);
+
+    // A whole line's worth, and then a budget shorter than the one instruction
+    // there is to run: the second is what the debt is for, and is what a CPS-1
+    // board's fractional line can hand over.
+    const lines = 100;
+    for ([_]u64{ sound_per_line, jr_cycles / 2 }) |owed| {
+        c.sound_over = 0;
+        const start = c.sound.cpu.cycles;
+        for (0..lines) |_| runZ80(&c, owed);
+
+        // Every cycle over the budget is a cycle owed, exactly, and no line
+        // can put more than one instruction on the tab.
+        const ran = c.sound.cpu.cycles -% start;
+        try testing.expectEqual(ran, owed * lines + c.sound_over);
+        try testing.expect(c.sound_over < jr_cycles);
+    }
 }
 
 /// The same spin, but with the interrupt mask down and a level 2 handler that
