@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Fetches the three MAME files the board generator reads.
+# Fetches the MAME files the board generator and §7.6 read.
 # They land in testdata/, which is gitignored: MAME's driver is not part of
 # this emulator and is never linked into it. What ships is boards/, which is
 # committed — running this is only needed to rewrite that.
@@ -30,6 +30,8 @@ sums="\
 4605223d48fbaa720e0b619ea0d761b8e2856d383d8cb33949b96a5125762c99  src/mame/capcom/cps1.cpp
 f899193fb52dd715bf98f056472dc2cb88bdd79eebf6de70de1d43f61cb23115  src/mame/capcom/cps1_v.cpp
 620f5f1eafe31cef8abeca54d03dba6fbcfa6bb903d900920b4bd158e9947a6a  src/mame/capcom/kabuki.cpp
+a8c09ef83841d75b81a4b2ee8ac029ebf8eecb6a743b016abb33e3d46e861602  src/mame/capcom/cps2.cpp
+c0f9ef55059fc48c5507a5f0ab1122826b44c98210adfe197e9b356d86a9a5e5  src/mame/capcom/cps2crypt.cpp
 60e9b2e1e0832d74696a9a0317693bb6cbe317747caad589a338e2c7636933e4  COPYING"
 
 mkdir -p "$into"

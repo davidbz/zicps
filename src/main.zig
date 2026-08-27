@@ -9,8 +9,11 @@
 const std = @import("std");
 const board = @import("board");
 const romset = @import("romset");
-const cps = @import("cps");
+const cps1 = @import("cps1");
+const controls = @import("controls");
+const eeprom = @import("eeprom");
 const scheduler = @import("scheduler");
+const clock = @import("clock");
 const video = @import("video");
 const audio = @import("audio");
 const input = @import("input");
@@ -24,6 +27,9 @@ const rl = @cImport(@cInclude("raylib.h"));
 
 const Config = config.Config;
 const Machine = boards.Machine;
+
+/// The save-state format for this machine and its CPU.
+const st = state.Format(cps1.Machine, scheduler.Cpu);
 
 /// A replay log is one word per frame.
 const max_replay_bytes = 16 << 20;
@@ -57,17 +63,17 @@ const audio_target_frames = 2 * audio_chunk_frames;
 /// panel's six inputs. Wider than zigesis's word because this machine has two
 /// six-button players and a coin door.
 const log_frame_bytes = 4;
-const log_pad2_shift = cps.button_count;
-const log_panel_shift = 2 * cps.button_count;
+const log_pad2_shift = controls.button_count;
+const log_panel_shift = 2 * controls.button_count;
 
-fn pack(in: cps.Inputs) u32 {
+fn pack(in: controls.Inputs) u32 {
     return @as(u32, in.pad[0]) |
         @as(u32, in.pad[1]) << log_pad2_shift |
         @as(u32, in.panel) << log_panel_shift;
 }
 
-fn unpack(word: u32) cps.Inputs {
-    const pad_mask = (@as(u32, 1) << cps.button_count) - 1;
+fn unpack(word: u32) controls.Inputs {
+    const pad_mask = (@as(u32, 1) << controls.button_count) - 1;
     return .{
         .pad = .{
             @truncate(word & pad_mask),
@@ -82,14 +88,14 @@ fn unpack(word: u32) cps.Inputs {
 const Replay = struct {
     log: []const u8,
 
-    fn at(r: Replay, frame: u32) cps.Inputs {
+    fn at(r: Replay, frame: u32) controls.Inputs {
         const offset = @as(usize, frame) * log_frame_bytes;
         if (offset + log_frame_bytes > r.log.len) return .{};
         return unpack(std.mem.readInt(u32, r.log[offset..][0..log_frame_bytes], .little));
     }
 };
 
-fn record(r: *std.ArrayList(u8), gpa: std.mem.Allocator, in: cps.Inputs) !void {
+fn record(r: *std.ArrayList(u8), gpa: std.mem.Allocator, in: controls.Inputs) !void {
     var word: [log_frame_bytes]u8 = undefined;
     std.mem.writeInt(u32, &word, pack(in), .little);
     try r.appendSlice(gpa, &word);
@@ -179,7 +185,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Two thirds of a megabyte of RAM, registers and framebuffer: too much for
     // the stack, and allocated exactly once whatever set goes in it.
-    const c = try gpa.create(cps.Cps);
+    const c = try gpa.create(cps1.Machine);
     defer gpa.destroy(c);
     c.* = .{ .board = .{}, .rom = .{ .program = &.{}, .gfx = &.{}, .audio = &.{}, .qsound = &.{}, .oki = &.{} } };
     var cpu: scheduler.Cpu = .{};
@@ -234,7 +240,7 @@ fn loadConfig(io: std.Io, gpa: std.mem.Allocator, path: []const u8) Config {
 ///
 /// The EEPROM does not survive this, because it is a battery, not a chip: the
 /// caller writes it out and reads it back around the call (`flushNv`).
-fn startMachine(c: *cps.Cps, cpu: *scheduler.Cpu, m: *const Machine) void {
+fn startMachine(c: *cps1.Machine, cpu: *scheduler.Cpu, m: *const Machine) void {
     c.* = .{ .board = m.b, .rom = m.rom };
     cpu.* = .{};
     scheduler.reset(c, cpu);
@@ -245,7 +251,7 @@ fn startMachine(c: *cps.Cps, cpu: *scheduler.Cpu, m: *const Machine) void {
 fn headless(
     io: std.Io,
     gpa: std.mem.Allocator,
-    c: *cps.Cps,
+    c: *cps1.Machine,
     cpu: *scheduler.Cpu,
     n: u32,
     replay_path: ?[]const u8,
@@ -307,7 +313,7 @@ const Sound = struct {
     }
 };
 
-fn report(c: *const cps.Cps, cpu: *const scheduler.Cpu, sound: *const Sound, frame: u32) void {
+fn report(c: *const cps1.Machine, cpu: *const scheduler.Cpu, sound: *const Sound, frame: u32) void {
     // A copy, because finishing the hash consumes it and the run goes on.
     var h = sound.h;
     std.debug.print("frame {d} hash={x:0>16} audio={x:0>16} samples={d} peak={d}\n", .{
@@ -350,19 +356,19 @@ fn nvPath(buf: []u8, set: []const u8) ![]const u8 {
 /// Read once when the set goes in. A short or missing file leaves the chip
 /// erased, which is what an unused battery reads as and what sends the board
 /// into its own service menu to be set up.
-fn loadNv(io: std.Io, c: *cps.Cps, set: []const u8) void {
+fn loadNv(io: std.Io, c: *cps1.Machine, set: []const u8) void {
     var buf: [shell.max_path]u8 = undefined;
     const path = nvPath(&buf, set) catch return;
-    var bytes: [cps.eeprom_bytes]u8 = @splat(0xff);
+    var bytes: [eeprom.bytes]u8 = @splat(0xff);
     const read = std.Io.Dir.cwd().readFile(io, path, &bytes) catch return;
     c.eeprom.load(read);
 }
 
-fn flushNv(io: std.Io, c: *cps.Cps, set: []const u8) !void {
+fn flushNv(io: std.Io, c: *cps1.Machine, set: []const u8) !void {
     if (!c.eeprom.dirty) return;
     var buf: [shell.max_path]u8 = undefined;
     const path = try nvPath(&buf, set);
-    var bytes: [cps.eeprom_bytes]u8 = undefined;
+    var bytes: [eeprom.bytes]u8 = undefined;
     c.eeprom.save(&bytes);
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = &bytes });
     c.eeprom.dirty = false;
@@ -383,10 +389,10 @@ fn saveState(w: *Window, slot: usize) void {
     var path_buf: [shell.max_path]u8 = undefined;
     const path = statePath(&path_buf, w.set, slot) catch return;
     // A state is the machine's own size, which is far more than a stack frame.
-    const buf = w.gpa.create([state.bytes]u8) catch |err| return w.ui.status("{t}", .{err});
+    const buf = w.gpa.create([st.bytes]u8) catch |err| return w.ui.status("{t}", .{err});
     defer w.gpa.destroy(buf);
 
-    state.save(w.c, w.cpu, buf);
+    st.save(w.c, w.cpu, buf);
     std.Io.Dir.cwd().writeFile(w.io, .{ .sub_path = path, .data = buf }) catch |err| {
         return w.ui.status("cannot write {s}: {t}", .{ path, err });
     };
@@ -403,13 +409,13 @@ fn loadState(w: *Window, slot: usize) void {
     var name: [shell.max_slot_name]u8 = undefined;
     const slot_name = shell.slotLabel(slot, &name);
 
-    const buf = std.Io.Dir.cwd().readFileAlloc(w.io, path, w.gpa, state.limit) catch |err| {
+    const buf = std.Io.Dir.cwd().readFileAlloc(w.io, path, w.gpa, st.limit) catch |err| {
         return w.ui.status("{s}: {t}", .{ slot_name, err });
     };
     defer w.gpa.free(buf);
     // A state from another build is refused here rather than loaded as
     // garbage, and the machine that was running is still running.
-    state.load(w.c, w.cpu, buf) catch |err| return w.ui.status("{s}: {t}", .{ slot_name, err });
+    st.load(w.c, w.cpu, buf) catch |err| return w.ui.status("{s}: {t}", .{ slot_name, err });
     w.ui.status("loaded {s}", .{slot_name});
 }
 
@@ -475,16 +481,16 @@ fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8) void {
     romRow(ui, "SOUND", regions.get(.audio), m.rom.audio.len);
     // The samples say which sound board this is, so the row names it: a QSound
     // set has a DL-1425 sample ROM and a plain CPS-1 one has the M6295's.
-    const cps1 = m.b.sound() == .cps1;
-    romRow(ui, if (cps1) "ADPCM" else "SAMPLES", if (cps1)
+    const plain = m.b.sound() == .cps1;
+    romRow(ui, if (plain) "ADPCM" else "SAMPLES", if (plain)
         regions.get(.oki)
     else
-        regions.get(.qsound), if (cps1) m.rom.oki.len else m.rom.qsound.len);
+        regions.get(.qsound), if (plain) m.rom.oki.len else m.rom.qsound.len);
     // The Kabuki key is the one thing in the board file that is a secret
     // rather than a setting: without it the Z80 runs garbage and the cabinet
     // is silent, so whether there is one is worth a line of its own. Only a
     // QSound board has one to be missing.
-    if (!cps1) shell.cardRow(ui, "KABUKI", if (m.b.kabuki == null) .bad else .good, "{s}", .{
+    if (!plain) shell.cardRow(ui, "KABUKI", if (m.b.kabuki == null) .bad else .good, "{s}", .{
         if (m.b.kabuki == null) "NO KEY" else "KEY SET",
     });
     // Which CPS-B-21 batch this board is, as far as anything can tell from
@@ -527,7 +533,7 @@ fn keyDown(key: u32) bool {
 /// Hands raylib a full sub-buffer whenever it has one free and the mixer has
 /// one ready. Polling like this is the pattern raylib's own audio-stream
 /// example uses, so there is no callback thread to synchronize with.
-fn drainAudio(c: *cps.Cps, stream: rl.AudioStream) void {
+fn drainAudio(c: *cps1.Machine, stream: rl.AudioStream) void {
     while (c.mixer.ready() >= audio_chunk_frames and rl.IsAudioStreamProcessed(stream)) {
         var pcm: [audio_chunk_frames]audio.Frame = undefined;
         for (&pcm) |*frame| frame.* = c.mixer.pop().?;
@@ -538,13 +544,13 @@ fn drainAudio(c: *cps.Cps, stream: rl.AudioStream) void {
 /// Sleeps off the surplus once the mixer is further ahead of playback than the
 /// target; being behind returns immediately, so the emulator catches up on its
 /// own without ever needing to skip a frame.
-fn paceToAudio(c: *cps.Cps, io: std.Io) void {
+fn paceToAudio(c: *cps1.Machine, io: std.Io) void {
     if (c.mixer.ready() <= audio_target_frames) return;
     const surplus_ms = (c.mixer.ready() - audio_target_frames) * std.time.ms_per_s / audio.sample_rate;
     io.sleep(.fromMilliseconds(@intCast(surplus_ms)), .awake) catch {};
 }
 
-fn fbImage(c: *cps.Cps) rl.Image {
+fn fbImage(c: *cps1.Machine) rl.Image {
     return .{
         .data = &c.v.fb,
         .width = video.width,
@@ -571,7 +577,7 @@ const WindowedArgs = struct {
 const Window = struct {
     io: std.Io,
     gpa: std.mem.Allocator,
-    c: *cps.Cps,
+    c: *cps1.Machine,
     cpu: *scheduler.Cpu,
     cfg: *Config,
     machine: *?Machine,
@@ -603,7 +609,7 @@ const Window = struct {
 fn windowed(
     io: std.Io,
     gpa: std.mem.Allocator,
-    c: *cps.Cps,
+    c: *cps1.Machine,
     cpu: *scheduler.Cpu,
     cfg: *Config,
     machine: *?Machine,
@@ -867,12 +873,12 @@ fn drawFrame(w: *Window) void {
 
 /// The board's refresh, rounded to whole frames a second: only the timer
 /// fallback uses it, and `SetTargetFPS` takes an integer anyway.
-const video_fps: c_int = @divTrunc(scheduler.refresh_num + @divTrunc(scheduler.refresh_den, 2), scheduler.refresh_den);
+const video_fps: c_int = @divTrunc(clock.refresh_num + @divTrunc(clock.refresh_den, 2), clock.refresh_den);
 
 /// The cabinet's control panel this frame. The wiring mask is what makes a
 /// three-button option real: the keys stay bound, and the machine is simply
 /// never handed the three bits that have no button bolted to them.
-fn readPanel(cfg: Config) cps.Inputs {
+fn readPanel(cfg: Config) controls.Inputs {
     const wiring = input.wiring(cfg.buttons == .six);
     return .{
         .pad = .{
@@ -919,9 +925,9 @@ fn usage() void {
 const testing = std.testing;
 
 test "an input log round-trips every bit the machine can be handed" {
-    const in = cps.Inputs{
-        .pad = .{ cps.Button.up.mask() | cps.Button.b6.mask(), cps.Button.left.mask() },
-        .panel = cps.Panel.coin1.mask() | cps.Panel.test_switch.mask(),
+    const in = controls.Inputs{
+        .pad = .{ controls.Button.up.mask() | controls.Button.b6.mask(), controls.Button.left.mask() },
+        .panel = controls.Panel.coin1.mask() | controls.Panel.test_switch.mask(),
     };
     try testing.expectEqual(in, unpack(pack(in)));
 
@@ -931,17 +937,17 @@ test "an input log round-trips every bit the machine can be handed" {
     std.mem.writeInt(u32, &word, pack(in), .little);
     const r = Replay{ .log = &word };
     try testing.expectEqual(in, r.at(0));
-    try testing.expectEqual(cps.Inputs{}, r.at(1));
+    try testing.expectEqual(controls.Inputs{}, r.at(1));
 }
 
 test "a recording is a replay of itself" {
     var log: std.ArrayList(u8) = .empty;
     defer log.deinit(testing.allocator);
 
-    const frames = [_]cps.Inputs{
-        .{ .pad = .{ cps.Button.right.mask(), 0 } },
+    const frames = [_]controls.Inputs{
+        .{ .pad = .{ controls.Button.right.mask(), 0 } },
         .{},
-        .{ .pad = .{ 0, cps.Button.b3.mask() }, .panel = cps.Panel.start1.mask() },
+        .{ .pad = .{ 0, controls.Button.b3.mask() }, .panel = controls.Panel.start1.mask() },
     };
     for (frames) |in| try record(&log, testing.allocator, in);
 
@@ -976,7 +982,7 @@ test "unplugging three buttons narrows what the machine is handed" {
     // which is why the panel's holes and the machine's word cannot disagree.
     const six = input.wiring(true);
     const three = input.wiring(false);
-    try testing.expectEqual(six, three | cps.Button.b4.mask() | cps.Button.b5.mask() | cps.Button.b6.mask());
-    try testing.expectEqual(@as(u16, 0), three & cps.Button.b6.mask());
-    try testing.expect(three & cps.Button.b3.mask() != 0);
+    try testing.expectEqual(six, three | controls.Button.b4.mask() | controls.Button.b5.mask() | controls.Button.b6.mask());
+    try testing.expectEqual(@as(u16, 0), three & controls.Button.b6.mask());
+    try testing.expect(three & controls.Button.b3.mask() != 0);
 }

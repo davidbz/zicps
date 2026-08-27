@@ -1,4 +1,4 @@
-# zicps: Capcom CP System 1.5 Emulator
+# zicps: Capcom CP System Emulator
 
 Design document and milestone plan. Audience: coding agents and human
 contributors. This document is the source of truth for scope, architecture, and
@@ -6,9 +6,12 @@ engineering standards. Read it in full before writing code.
 
 ## 1. Goal
 
-Build a complete, playable emulator for Capcom's CP System 1.5 — the CPS Dash
-board: CPS-1 video, a 68000 running unencrypted program code, and a separate
-sound board carrying an encrypted Z80 and a QSound DSP. Both CPUs already
+Build a complete, playable emulator for Capcom's CP System family. The board
+this project started on is CP System 1.5 — the CPS Dash board: CPS-1 video, a
+68000 running unencrypted program code, and a separate sound board carrying an
+encrypted Z80 and a QSound DSP. CPS-1, CPS-1.5 and the plain CPS-1 sound board
+all ship (§9, M0–M9); CP System II is the generation after them and is
+specified here as M11–M13. Both CPUs already
 exist as finished, conformance-tested packages: [z68k](https://github.com/davidbz/z68k)
 (all 317,500 SingleStepTests m68000 cases, exact on architectural state, cycle
 counts, and data-space bus cycles) and [z80](https://github.com/davidbz/z80)
@@ -31,12 +34,12 @@ Reused, and how:
 
 | From zigesis | How it arrives |
 |---|---|
-| `src/audio.zig` — polyphase windowed-sinc resampler, exact-fraction rate carry, fixed ring buffer, no allocation and no floats at run time | copied verbatim, tests and all. Needs an upsampling path: this bank only drops a rate (§6.2) |
-| `src/ui/snow.zig` — the idle screen | copied verbatim |
-| `src/config.zig` — versioned `key = value` file, unknown keys ignored, values clamped | copied, new fields |
-| `src/input.zig` — one `Action` enum covering pads and hotkeys, bindings written as key names, host keyboard behind a function pointer | same shape, arcade action list |
-| `src/state.zig` — header plus `asBytes` of the machine, comptime `layout` hash refusing a state from another build | same technique, this machine's struct |
-| `src/ui/shell.zig`, `src/main.zig` — menu, file browser, status bar, audio-paced frame loop, screenshots, replay | adapted: the cartridge card becomes a board card, the pad panel becomes a control panel |
+| `src/common/audio.zig` — polyphase windowed-sinc resampler, exact-fraction rate carry, fixed ring buffer, no allocation and no floats at run time | copied verbatim, tests and all. Needs an upsampling path: this bank only drops a rate (§6.2) |
+| `src/common/ui/snow.zig` — the idle screen | copied verbatim |
+| `src/common/config.zig` — versioned `key = value` file, unknown keys ignored, values clamped | copied, new fields |
+| `src/common/input.zig` — one `Action` enum covering pads and hotkeys, bindings written as key names, host keyboard behind a function pointer | same shape, arcade action list |
+| `src/common/state.zig` — header plus `asBytes` of the machine, comptime `layout` hash refusing a state from another build | same technique, this machine's struct |
+| `src/common/ui/shell.zig`, `src/main.zig` — menu, file browser, status bar, audio-paced frame loop, screenshots, replay | adapted: the cartridge card becomes a board card, the pad panel becomes a control panel |
 | `build.zig` module graph, the three workflows, the headless suites in `test/` | patterns copied, targets renamed |
 
 Not reused, and deliberately: the frontend is *copied* rather than shared as a
@@ -66,6 +69,11 @@ M3's ceilings); the hook is still what settles it.
 New repository consuming z68k and z80 as Zig package dependencies. Do not fork
 either CPU into this repo.
 
+The tree is split by generation, because that is the axis the hardware is split
+on: a chip Capcom reused across boards is common, and the wiring of one board is
+that board's. Three siblings under `src/`, and nothing at the root of it but the
+frontend.
+
 ```
 zicps/
   build.zig
@@ -73,22 +81,31 @@ zicps/
   DESIGN.md              # this file
   src/
     main.zig             # entry point, arg parsing, frontend loop
-    cps.zig              # machine state + bus (memory map, I/O, arbitration)
-    scheduler.zig        # reference-clock accounting, per-line stepping
-    video.zig            # CPS-A / CPS-B: layers, sprites, priority, palette
-    soundboard.zig       # sound-board Z80 bus, banking, command latch
-    kabuki.zig           # opcode/data decryption, key from the board file
-    qsound.zig           # DL-1425, high-level
-    audio.zig            # mixing, resampling, ring buffer to the frontend
-    input.zig            # controls, key bindings
-    romset.zig           # ROM set loading, interleave, graphics decode
-    board.zig            # the board file: what the battery held (§8)
-    boards.zig           # the shipped board files, embedded and looked up
-    state.zig            # save-state serialization
-    config.zig           # options persistence
-    ui/
-      shell.zig          # window, menu, board card, status bar
-      snow.zig
+    common/
+      video.zig          # CPS-A / CPS-B: register files, tilemaps, palette
+      clock.zig          # the reference tick, the rates, the sound board's line
+      soundboard.zig     # sound-board Z80 bus, banking, command latch
+      kabuki.zig         # opcode/data decryption, key from the board file
+      qsound.zig         # DL-1425, high-level
+      ym2151.zig         # the OPM
+      oki.zig            # the M6295
+      audio.zig          # mixing, resampling, ring buffer to the frontend
+      controls.zig       # buttons, panel, what a pad holds
+      input.zig          # key bindings on top of controls.zig
+      eeprom.zig         # the 93C46, protocol only
+      romset.zig         # ROM set loading, interleave, graphics decode
+      board.zig          # the board file: what the battery held (§8)
+      boards.zig         # the shipped board files, embedded and looked up
+      state.zig          # save-state serialization, generic over the machine
+      config.zig         # options persistence
+      ui/
+        shell.zig        # window, menu, board card, status bar
+        snow.zig
+    cps1/                # CPS-1 and CPS-1.5
+      machine.zig        # machine state + bus (memory map, I/O, arbitration)
+      video.zig          # object list, starfields, CPS-B protection reads
+      scheduler.zig      # this board's frame loop: the order a line goes in
+    cps2/                # CP System II — arrives at M11 (§9)
   test/
     system_test.zig      # headless frame-hash regression suite
     compat.zig           # boot every set in a directory, report what happened
@@ -101,6 +118,31 @@ zicps/
     testrom/             # our own CPS-1 test ROM: source, board file, binary
 ```
 
+**The one rule the layout exists to enforce: a module under `common/` may not
+import from a system tree.** Dependencies point inward — `cps1/` and `cps2/`
+import `common/`, never each other, and never the other way round. A shared
+module that needs to know which board it is on is not shared; either the
+knowledge belongs to the caller, or the seam is in the wrong place. The build
+graph is what enforces this, the same way it enforces that only `main.zig` and
+`common/ui/shell.zig` can reach raylib: a `common/` module is declared with no
+system module among its imports, so the import will not resolve.
+
+Two consequences worth writing down, because both look like exceptions and are
+not. `common/kabuki.zig` decrypts a CPS-1-only Z80 ROM, but it is a pure
+key-and-bytes transform that `common/soundboard.zig` calls from `load()`;
+pushing it into `cps1/` would point a common module at a system tree, which is
+the thing forbidden above. And `common/video.zig` holds the CPS-A/CPS-B pair
+itself — the register files, the tilemaps and the palette, which MAME's
+`cps1_v.cpp` shares between both generations verbatim — while each system's
+`video.zig` holds its own object list and the order its passes go down in,
+because that is the part the two generations genuinely disagree about.
+
+Module names, not paths, are what `@import` sees: every source file is one
+`b.addModule` entry and imports its neighbours by bare name. Inside `cps1/`,
+`video` is *this board's* video and the shared chip pair is `chip`; from outside
+the tree, the same module is `cps1_video`, because there the prefix is what
+tells the two apart.
+
 ### 3.2 Data-oriented design (mandatory)
 
 Every subsystem is a plain struct of data plus free-standing functions (or
@@ -108,7 +150,8 @@ methods that are pure state transitions). No hidden state, no allocation inside
 the emulation loop, no callbacks between chips.
 
 - All chip state lives in flat, fixed-size structs: `Video`, `Z80`, `QSound`,
-  `Controls`. The whole machine is one `Cps` struct that owns them by value.
+  `Controls`. The whole machine is one `Machine` struct that owns them by value,
+  one per generation — `cps1.Machine` today, `cps2.Machine` at M11.
   This is what makes save states trivial: serializing the machine is copying
   these structs (§8).
 - Business logic never lives next to I/O. The video chip renders into a
@@ -124,8 +167,8 @@ the emulation loop, no callbacks between chips.
 
 The exception, stated once so it is not mistaken for drift: a ROM set is
 megabytes whose size is known only at load, so the program ROM, the decoded
-graphics, and the sample ROM are heap slices held on `Cps` and reattached after
-a save-state load, exactly as zigesis reattaches its cartridge. Nothing else
+graphics, and the sample ROM are heap slices held on `Machine` and reattached
+after a save-state load, exactly as zigesis reattaches its cartridge. Nothing else
 allocates, and nothing allocates per frame.
 
 ### 3.3 Timing model
@@ -135,20 +178,38 @@ difference. The Genesis has a single 53.693175 MHz master clock that every part
 of the machine divides, and the emulator's time base is that wire. A CPS-1.5
 board has **three independent oscillators**: the CPU crystal, the 16 MHz video
 crystal, and the sound board's own. There is no master clock to divide, so the
-time base here is a *reference tick* of 120 MHz — the smallest number that
-divides all four rates as integers — and it is a modelling convenience, not
-something on the board.
+time base here is a *reference tick* — the smallest rate that divides all of the
+board's into integers — and it is a modelling convenience, not something on the
+board.
+
+That reference is **240 MHz** — 120 MHz in the tree today, doubling at M11 for
+the reason below — and every CPU rate in the family divides it:
 
 | Part | Rate | Reference divider |
 |---|---|---|
-| 68000 | 12 MHz | 10 |
-| Sound-board Z80 | 8 MHz | 15 |
-| Pixel clock | 8 MHz (16 MHz crystal ÷ 2) | 15 |
-| QSound sample | 24.038 kHz (60 MHz ÷ 2 ÷ 1248) | 4992 |
+| 68000, CPS-2 | 16 MHz | 15 |
+| 68000, `cps1_12MHz` | 12 MHz | 20 |
+| 68000, `cps1_10MHz` | 10 MHz | 24 |
+| Sound-board Z80 | 8 MHz | 30 |
+| Pixel clock | 8 MHz (16 MHz crystal ÷ 2) | 30 |
+| QSound sample | 24.038 kHz (60 MHz ÷ 2 ÷ 1248) | 9984 |
 
 512 dots per line and 262 lines make 134,144 dots a frame, so the picture runs
-at 59.6374 Hz with 384 × 224 of it visible. One line is 7680 reference ticks:
-768 cycles of 68000, 512 of Z80, and one and a half QSound samples.
+at 59.6374 Hz with 384 × 224 of it visible — the same on both generations. One
+line is 15,360 reference ticks at 240 MHz: 768 cycles of a 12 MHz 68000, 1024 of
+a 16 MHz one, 512 of Z80, and one and a half QSound samples.
+
+The reference was 120 MHz through M10 and doubles at M11 (§9), because 120 does
+not divide CPS-2's 16 MHz 68000 — 7.5 — and a fractional divider would put the
+main CPU on the debt machinery that exists for the chips that genuinely need it.
+Doubling is also what unblocks `cps1_10MHz`, the bug M9 named and deferred:
+120 MHz has no integer for 10 MHz either. It is deliberately not folded into
+M10, whose whole acceptance test is that no pinned hash moves, because doubling
+rescales every integer division in the line loop and any rounding boundary that
+shifts would be indistinguishable from a bug the split introduced.
+
+The plain CPS-1 sound board's 3.579545 MHz stays fractional against any
+reference worth having, and keeps the debt counters it has had since M9.
 
 (Earlier drafts of this section said 59.6295 Hz, and MAME's `cps1.cpp` carries a
 comment saying 59.63. Both are the same arithmetic rounded differently:
@@ -220,8 +281,16 @@ Nice to have, only after all of the required list ships: recent-sets list,
 per-channel audio muting, fast-forward and frame advance, screenshot hotkey,
 CRT-style scanline overlay.
 
-Explicitly out of scope: CP System II, netplay, cheats, shader pipelines,
-per-game databases, and any protection device a board file cannot describe.
+Explicitly out of scope: netplay, cheats, shader pipelines, per-game databases,
+and any protection device a board file cannot describe.
+
+CP System II was on that list until M10 (§9) took the tree apart along the seam
+between the chips Capcom reused and the boards that used them; it is specified
+as M11–M13 and is in scope. CP System III is not, and it is the reason the split
+is by generation rather than by a two-way `if`: CPS-3 is a different CPU, a
+different video chip and a cartridge-resident encrypted filesystem, so a machine
+that assumed there were exactly two answers would have to be taken apart again.
+`cps3/` is a directory nobody has to argue about creating.
 
 CPS-1 boards with the YM2151 and OKI ADPCM sound hardware were on that list
 until M9 (§9) took them off it. They were excluded for being a second sound
@@ -484,7 +553,86 @@ Z80 cycles to 704 reference ticks, and 21 YM2151 samples (the chip divides its
 clock by 64) to 45056. Both get the debt counter §3.3 already uses for QSound's
 4992. The OKI is the easy one: 16 MHz over 16 is 1 MHz, over 132 is 7575.76 Hz,
 and 15840 reference ticks divide that exactly — 19800 when a game pulls pin 7
-low and asks for 6060.6 Hz instead.
+low and asks for 6060.6 Hz instead. (Those five figures are against the 120 MHz
+reference this section was written under; §3.3's reference doubles at M11 and
+every one of them doubles with it.)
+
+### 7.6 CP System II, quoted and not yet measured
+
+Everything in this subsection is read from MAME at the pinned commit
+`f34f02505e32c1993c6a782b6814232cbfc74e36` (mame0289), in `src/mame/capcom/`:
+`cps2.cpp`, `cps2crypt.cpp` and `cps1_v.cpp`. None of it has been run yet.
+Each item names the milestone that will confirm it, in §7.4's style: what is
+written here is what the driver says, and what the milestone finds is what
+replaces it.
+
+**What is not new.** The reason CPS-2 is three milestones and not a rewrite is
+how much of it is the board zicps already runs. `qsound_sub_map` in cps2.cpp is
+identical to CPS-1's, down to the 250 Hz interrupt taken from 8 MHz ÷ 32000, so
+`common/soundboard.zig`, `common/qsound.zig` and `clock.runSound`'s QSound arm
+are reused with no change at all. So are the 93C46, the `gfx_cps1` graphics
+decode, the 3072-entry palette, the 384 × 224 picture at 59.6374 Hz, the CPS-A
+register file at `0x800100`, and the raster down-counters at CPS-B `0x0e`,
+`0x10` and `0x12`. There is no Kabuki: the sound Z80 runs its ROM in clear.
+
+**The memory map** (`cps2_state::cps2_base_map` and `cps2_main_map`), confirmed
+at M11:
+
+| Window | What it is |
+|---|---|
+| `0x000000-0x3fffff` | program ROM, 4 MiB — twice CPS-1's window |
+| `0x400000-0x40000b` | the object output latch, mirrored at `0xfffff0` |
+| `0x618000-0x619fff` | QSound shared RAM |
+| `0x660000-0x663fff` | battery-backed RAM, present only if `0x804030` bit 14 is clear |
+| `0x700000-0x701fff` | object RAM bank 0 |
+| `0x708000-0x709fff` | object RAM bank 1, mirrored at `0x70e000` |
+| `0x800100-0x80013f`, `0x804100-0x80413f` | CPS-A registers, twice |
+| `0x800140-0x80017f`, `0x804140-0x80417f` | CPS-B registers, twice |
+| `0x804000/0x804010/0x804020` | IN0, IN1, IN2 — the EEPROM's data-out is in IN2 |
+| `0x804030` | QSound volume and the RAM-present bits |
+| `0x804040` | the EEPROM's three pins |
+| `0x8040b0-0x8040b2` | the DIP-switch read, which real boards leave floating |
+| `0x8040e0` | bit 0: which object RAM bank the CPU sees |
+| `0x900000-0x92ffff` | graphics RAM, exactly where CPS-1 has it |
+| `0xff0000-0xffffff` | work RAM |
+
+The 68000 is a 16 MHz part (`M68000(config, m_maincpu, 16_MHz_XTAL)`), which is
+why §3.3's reference doubles.
+
+**The encryption**, confirmed at M11. CPS-2 encrypts opcodes only: MAME gives
+the CPU a second address space, `decrypted_opcodes_map`, holding a decrypted
+copy of the whole 4 MiB program region while data reads see the ROM as dumped.
+z68k already has the hook this needs — the `@hasDecl`-gated `setProgram`, added
+for zigesis — so no core change is required, and the decrypt is done once at
+load into a second heap slice rather than per fetch.
+
+The cipher itself (`cps2crypt.cpp`) is two Feistel stages over a 16-bit word,
+keyed off a 20-byte `key` ROM that each board carries beside its program.
+`init_cps2crypt` reads that ROM out into ten 16-bit words through a fixed bit
+permutation — bit `b` of the output is bit `(317 - b) % 160` of the key — and
+then:
+
+- `decoded[0..3]` are the 64-bit master key, as two 32-bit halves.
+- `decoded[7]` and `decoded[8]` are the constants `0x4000` and `0x0900`, which
+  makes them a free sanity check that a key file is a key file.
+- `decoded[9]` sets the address range the cipher covers:
+  `upper = (((~decoded[9] & 0x3ff) << 14) | 0x3fff) + 1`, from zero.
+- `decoded[9] == 0xffff` is a **dead board** — the battery is gone and the key
+  ROM reads as ones. MAME's answer is to encrypt only `0xff0000-0xffffff`, which
+  is what a suicided board does: it runs far enough to find out it is dead. The
+  frontend should say so on the board card (§5.2) rather than let the user
+  wonder why the game is a black screen.
+
+**The video**, confirmed at M12, and the one place CPS-2 genuinely differs:
+
+- Object RAM is two 8 KiB banks. `0x8040e0` bit 0 picks the one the CPU writes,
+  and `cps2_objram_latch` takes the chip's copy on the vblank edge — CPS-1's
+  double buffering done with two banks instead of a copy out of graphics RAM.
+- Sprite priority is a bitmap, not a pen mask. `pri_ctrl` feeds `primasks[8]`,
+  and each sprite is composited against a per-pixel priority plane the tilemaps
+  wrote. CPS-1's `Line.over: [width]bool` is the degenerate one-bit case of it;
+  M12 widens that field to `prio: [width]u8` when there is a second
+  implementation to design the shape against, and not before.
 
 ## 8. The Board File, ROM Sets, Persistence
 
@@ -507,6 +655,15 @@ The file the user supplies always wins, and a board file that is missing or
 incoherent stops the load with exactly what it needed rather than drawing
 garbage and leaving the user to guess. A wrong CPS-B offset looks like a video
 bug, so failing loudly is worth more than any fallback guess.
+
+Which generation a set is on is a line in that file too: `system = cps1`, added
+at M11, with `cps1` as the default so that all 194 committed files and the
+pinned hashes that go with them stand unchanged. A CPS-2 board file says
+`system = cps2` and carries a `key` region beside `program` (§7.6). It carries
+very little else: `cps1_v.cpp` has exactly one row — `{"cps2", CPS_B_21_DEF,
+mapper_cps2}` — for all 324 CPS-2 sets, so the half of a CPS-2 board file that
+is not ROM lines is a constant, and `tools/mame_to_board.zig` writes the same
+seven lines into every one of them.
 
 But asking every user to transcribe thirty lines out of a C++ file before their
 set will run is a wall, and it is a wall nobody else puts up. So a library of
@@ -1245,6 +1402,115 @@ Explicitly not in M9: the 68000's clock. `cps1_10MHz` is MAME's base config and
 20% fast against §3.3's fixed 12 MHz. That is a real bug, it predates this
 milestone, and it will be tempting to blame on this milestone's timing work —
 which is exactly why it is named here and fixed on its own.
+
+### M10: The split — one tree per generation
+
+No new hardware. Every file at the root of `src/` was named as if it were the
+machine (`cps.zig`, `video.zig`, `scheduler.zig`) when each was two things
+stirred together: a chip Capcom reused across generations, and the wiring of one
+particular board. Adding CPS-2 means answering "which half is this?" for every
+file, and doing that while also writing new hardware is how the answers get
+chosen to suit whatever is being typed at the time. So this milestone does the
+split and nothing else, and CPS-2 lands against a base that already has the
+seam.
+
+Deliverables:
+
+- §3.1's three trees: `src/main.zig`, `src/common/`, `src/cps1/`, and the rule
+  that a `common/` module may not import from a system tree. Eleven of the
+  seventeen files moved with no content change at all, because `@import` sees
+  module names and not paths.
+- `src/cps.zig` cut three ways along the boundaries that were already in it:
+  `common/controls.zig` (buttons, panel, pads), `common/eeprom.zig` (the 93C46
+  and nothing about which port drove its pins), and `cps1/machine.zig` (the
+  memory map and the bus). The board's knowledge of *which bit is which wire*
+  stays on the board, in `eepromPins`.
+- `src/video.zig` cut in two: `common/video.zig` keeps the CPS-A/CPS-B pair —
+  register files, raster counters, palette, the tilemap table and `drawTilemap`,
+  and `beginLine`/`drawLayer`/`emit` so that each system's `renderLine` stays
+  short — and `cps1/video.zig` keeps the object list, both starfields, the
+  CPS-B protection reads, and the order CPS-1 interleaves its four passes in.
+- `src/scheduler.zig` cut in two: `common/clock.zig` takes the reference rates,
+  the sound board's share of a line, and a `Timing` struct holding the ten debt
+  counters that used to be fields on the machine; `cps1/scheduler.zig` keeps the
+  frame loop, which is this board's order and not a shared one.
+- `common/state.zig` becomes `Format(comptime M, comptime C)`, so the save-state
+  layout hash is computed per machine type rather than for the only one there
+  used to be.
+
+Acceptance: `test`, `testrom` and `compat` all green with **every pinned frame
+and audio hash unmoved** — that is the whole acceptance test for a milestone
+that is supposed to change nothing. The one deliberate break is
+`state.layout_hash`, which moves because the `Timing` fields left the machine
+struct, so save states written before M10 are refused. That is the documented
+purpose of that hash (§8.3) and not a regression.
+
+Ceilings left behind:
+
+- `common/video.zig` has no tests of its own. The rendering tests nearly all
+  drive `renderLine`, which is CPS-1's, and they share their fixtures; they
+  moved to `cps1/video.zig` whole rather than being split down the middle. The
+  common half is covered through them. Give it tests of its own when CPS-2's
+  `renderLine` gives it a second caller to test against.
+- `Line.over` is still `[width]bool`. Widening it to a priority plane before
+  M12 would be guessing at a shape with one implementation to fit.
+- There is no `Machine` tagged union, no `system` board key and no `max_gfx`
+  raise. With one arm a union is a switch with one case, and the board key would
+  touch all 194 committed files for no behaviour; both arrive at M11 with a
+  second generation to justify them.
+- The 240 MHz reference is not in M10, for the reason §3.3 gives.
+- One real bug was found by the differential and is worth naming, because it is
+  the failure mode this kind of change has: `cboard` in `cps1/machine.zig` was
+  left calling the *common* `readB` instead of CPS-1's, so the board ID read
+  came back as open bus and every plain CPS-1 set failed its boot check four
+  frames in. The unit tests and the test ROM stayed green — neither has a board
+  ID to check — and `compat` against real sets is what caught it. A behaviour-
+  preserving change is only as good as the thing that says behaviour was
+  preserved.
+
+### M11: CPS-2 boots
+
+Deliverables:
+
+- §3.3's reference doubles to 240 MHz, with its own re-pin of every hash, on its
+  own commit, ahead of anything CPS-2. `cps1_10MHz` is fixed here too: it is the
+  same change and M9 deferred it to exactly this point.
+- `src/cps2/machine.zig`: §7.6's memory map. `src/cps2/scheduler.zig`: the frame
+  loop, which reuses `clock.runSound`'s QSound arm unchanged.
+- `src/cps2/crypt.zig`: the two-stage Feistel of §7.6, decrypting the whole
+  program region once at load into a second slice, handed to z68k through
+  `setProgram`. Its unit test is MAME's own: a known set's first sixteen
+  decrypted opcodes, pinned.
+- `romset.zig` gains a `key` region and the decrypted buffer; a dead key
+  (§7.6's `decoded[9] == 0xffff`) loads and says "suicided board" on the card
+  rather than being refused, because that is what the hardware does.
+- `main.zig` grows the `Machine` tagged union with its second arm, and
+  `board.zig` the `system` key of §8.1.
+
+Acceptance: one CPS-2 set reaches its boot self-test and passes it, with sound.
+`compat` grows a second directory and reports it separately, because a CPS-2 set
+with no video yet is "blank" for a reason that is not a fault.
+
+### M12: CPS-2 video
+
+Deliverables: `Line.over` widens to `prio: [width]u8`; object RAM banking and
+the vblank latch; the CPS-2 sprite entry decode; `primasks[8]` compositing
+(§7.6). CPS-1's `renderLine` is re-expressed against the wider field and must
+produce the same hashes it produced at M10 — that is how the widening is shown
+to be a generalisation and not a rewrite.
+
+Acceptance: a CPS-2 set draws its attract mode; the M10 hashes still stand.
+
+### M13: The CPS-2 board library
+
+Deliverables: `tools/mame_to_board.zig` emits CPS-2 rows — one constant register
+mapping for all 324 sets (§8.1) — and `boards/` gains them; `max_gfx` goes from
+16 MiB to 64 MiB, which is what the largest CPS-2 sets need; `compat` sweeps
+both libraries.
+
+Acceptance: the sweep boots the CPS-2 library the way M5.5's boots the CPS-1
+one, and what does not boot is written down here rather than left to be
+rediscovered.
 
 ## 10. Testing Strategy Summary
 

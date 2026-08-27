@@ -9,11 +9,16 @@
 const std = @import("std");
 const board = @import("board");
 const romset = @import("romset");
-const video = @import("video");
+/// The CPS-A/CPS-B pair the whole family shares, and this board's half of it.
+const chip = @import("video");
+const video = @import("cps1_video");
 const audio = @import("audio");
 const soundboard = @import("soundboard");
+const controls = @import("controls");
+const eeprom = @import("eeprom");
+const clock = @import("clock");
 
-/// This file, so that `Cps` can hand the 68000 core the bus entry points it
+/// This file, so that `Machine` can hand the 68000 core the bus entry points it
 /// calls by method while the functions themselves stay free.
 const file = @This();
 
@@ -68,7 +73,7 @@ pub const ram_hi = 0xffffff;
 comptime {
     // A register file wider than its window holds registers no bus cycle can
     // reach, and a board file naming one would be accepted and then ignored.
-    std.debug.assert(cps_a_hi - cps_a_lo + 1 == video.a_regs_bytes);
+    std.debug.assert(cps_a_hi - cps_a_lo + 1 == chip.a_regs_bytes);
     std.debug.assert(cps_b_hi - cps_b_lo + 1 == board.cps_b_bytes);
 }
 
@@ -77,49 +82,13 @@ pub const ram_bytes = 0x10000;
 /// as many bytes as it is addresses — and the same 4 KiB the Z80 sees.
 pub const shared_bytes = soundboard.shared_bytes;
 
-/// One player's controls, active high. Bit order is the board's own: the four
-/// directions in the order the wiring reads them, then six buttons.
-pub const Button = enum(u4) {
-    right,
-    left,
-    down,
-    up,
-    b1,
-    b2,
-    b3,
-    b4,
-    b5,
-    b6,
-
-    pub fn mask(b: Button) u16 {
-        return @as(u16, 1) << @intFromEnum(b);
-    }
-};
-pub const button_count = @typeInfo(Button).@"enum".fields.len;
-
-/// The panel inputs a board with no DIP switches cannot do without: without
-/// service and test there is no way into the settings menu.
-pub const Panel = enum(u3) {
-    coin1,
-    coin2,
-    service,
-    start1,
-    start2,
-    test_switch,
-
-    pub fn mask(p: Panel) u8 {
-        return @as(u8, 1) << @intFromEnum(p);
-    }
-};
-pub const panel_count = @typeInfo(Panel).@"enum".fields.len;
-
 /// The bits IN0 puts each panel input on. Not a straight run: the two start
 /// buttons skip a bit, and the test switch sits above them.
-const in0_bit = [panel_count]u8{ 0x01, 0x02, 0x04, 0x10, 0x20, 0x40 };
+const in0_bit = [controls.panel_count]u8{ 0x01, 0x02, 0x04, 0x10, 0x20, 0x40 };
 /// IN1 carries player 1 in its low byte and player 2 in its high byte, seven
 /// bits each; buttons 4 to 6 come from IN2 instead.
 const in1_player_bits = 7;
-const in2_button_shift = @intFromEnum(Button.b4);
+const in2_button_shift = @intFromEnum(controls.Button.b4);
 
 /// The IN0 window holds four byte-wide registers a word apart: the system
 /// inputs, then the three DIP banks.
@@ -136,175 +105,25 @@ const dsw_absent = 0xff;
 const demo_sounds = 0x20;
 const dsw_setting = [dsw_slots - 1]u8{ 0xff, 0xff, 0xff & ~@as(u8, demo_sounds) };
 
-pub const Inputs = struct {
-    pad: [2]u16 = @splat(0),
-    panel: u8 = 0,
-};
-
-// ----------------------------------------------------------------- eeprom
-
-/// A QSound board has no DIP switches, so everything a DIP switch would have
-/// said lives in a 93C46 serial EEPROM and is edited in the board's own service
-/// menu. Sixty-four words, one wire in and one out.
-pub const eeprom_words = 64;
-pub const eeprom_bytes = eeprom_words * 2;
-/// An erased cell is all ones, which is what an unprogrammed chip holds and
-/// what a board with no `.nv` file beside it comes up with.
-pub const eeprom_erased = 0xffff;
-
 /// The three wires the 68000 drives, on the low byte of `0xf1c006`.
 const eeprom_di = 0x10;
 const eeprom_clk = 0x20;
 const eeprom_cs = 0x40;
 
-/// Start bit, two opcode bits, six address bits: what the chip listens for
-/// before it does anything at all.
-const eeprom_command_bits = 9;
-const eeprom_data_bits = 16;
-/// A read clocks out a dummy zero before the word, so its shift register is a
-/// bit wider than the word it holds.
-const eeprom_read_bits = eeprom_data_bits + 1;
+/// The port register the 68000 leaves the three wires on, as the chip sees
+/// them: which bit is which is this board's wiring and not the 93C46's.
+fn eepromPins(c: *Machine, value: u8) void {
+    c.eeprom.write(value & eeprom_cs != 0, value & eeprom_clk != 0, @intFromBool(value & eeprom_di != 0));
+}
 
-const EepromOp = enum(u2) { special, write, read, erase };
-/// `special` puts its own two bits at the top of the address field.
-const EepromSpecial = enum(u2) { disable, write_all, erase_all, enable };
-
-pub const Eeprom = struct {
-    data: [eeprom_words]u16 = @splat(eeprom_erased),
-    /// Set by any cell that changed, cleared by the frontend once the sidecar
-    /// file has been rewritten. A game writes its settings a word at a time.
-    dirty: bool = false,
-
-    cs: bool = false,
-    clk: bool = false,
-    /// Erase and write are refused until an enable command arrives, which is
-    /// what stops a glitching board from wiping its own settings.
-    writable: bool = false,
-
-    /// What has been clocked in: the command, then a write's data word.
-    shift: u16 = 0,
-    bits: u8 = 0,
-    in_data: bool = false,
-    /// The data word about to arrive goes to every cell, not to `addr`.
-    all: bool = false,
-    addr: u6 = 0,
-
-    /// What is being clocked out, MSB first, and how much of it is left.
-    out: u32 = 0,
-    out_bits: u8 = 0,
-
-    /// The one wire the 68000 reads back. High while idle: a real chip pulls it
-    /// there when it is ready for the next command, and a driver polls for it.
-    pub fn read(e: *const Eeprom) u1 {
-        if (e.out_bits == 0) return 1;
-        return @truncate(e.out >> @intCast(e.out_bits - 1));
-    }
-
-    pub fn write(e: *Eeprom, value: u8) void {
-        const cs = value & eeprom_cs != 0;
-        const clk = value & eeprom_clk != 0;
-        // Dropping chip select abandons whatever was half said. The enable
-        // latch is not part of that: it holds until a disable command.
-        if (!cs) {
-            e.* = .{ .data = e.data, .dirty = e.dirty, .writable = e.writable };
-            return;
-        }
-        defer e.clk = clk;
-        e.cs = true;
-        if (!clk or e.clk) return;
-        e.shiftIn(@intFromBool(value & eeprom_di != 0));
-    }
-
-    /// One rising clock edge.
-    fn shiftIn(e: *Eeprom, di: u1) void {
-        if (e.out_bits != 0) {
-            e.out_bits -= 1;
-            return;
-        }
-        // Leading zeros are not part of a command: the chip waits for the
-        // start bit, so a driver may clock as many of them as it likes. A data
-        // word has no start bit and every one of its zeros counts.
-        if (!e.in_data and e.bits == 0 and di == 0) return;
-        e.shift = e.shift << 1 | di;
-        e.bits += 1;
-
-        if (e.in_data) {
-            if (e.bits < eeprom_data_bits) return;
-            const word = e.shift;
-            const all = e.all;
-            e.idle();
-            if (!all) return e.poke(e.addr, word);
-            for (0..eeprom_words) |i| e.poke(@intCast(i), word);
-            return;
-        }
-        if (e.bits < eeprom_command_bits) return;
-        e.command();
-    }
-
-    fn command(e: *Eeprom) void {
-        const addr: u6 = @truncate(e.shift);
-        const op: EepromOp = @enumFromInt(@as(u2, @truncate(e.shift >> 6)));
-        e.addr = addr;
-        e.idle();
-        switch (op) {
-            .read => {
-                e.out = e.data[addr];
-                e.out_bits = eeprom_read_bits;
-            },
-            .write => {
-                e.in_data = true;
-            },
-            .erase => e.poke(addr, eeprom_erased),
-            .special => switch (@as(EepromSpecial, @enumFromInt(@as(u2, @truncate(addr >> 4))))) {
-                .enable => e.writable = true,
-                .disable => e.writable = false,
-                .erase_all => for (0..eeprom_words) |i| e.poke(@intCast(i), eeprom_erased),
-                // Write-all takes its word the way a write does; every cell
-                // gets it rather than the one the address field named.
-                .write_all => {
-                    e.in_data = true;
-                    e.all = true;
-                },
-            },
-        }
-    }
-
-    fn poke(e: *Eeprom, addr: u6, value: u16) void {
-        if (!e.writable) return;
-        e.data[addr] = value;
-        e.dirty = true;
-    }
-
-    fn idle(e: *Eeprom) void {
-        e.shift = 0;
-        e.bits = 0;
-        e.in_data = false;
-        e.all = false;
-    }
-
-    /// The `.nv` file beside the set, big-endian so it reads the way the board
-    /// does. A short or missing file leaves the rest of the chip erased, which
-    /// is what a board whose settings menu grew a page sees on real hardware.
-    pub fn load(e: *Eeprom, bytes: []const u8) void {
-        e.* = .{};
-        for (0..@min(eeprom_words, bytes.len / 2)) |i| {
-            e.data[i] = std.mem.readInt(u16, bytes[i * 2 ..][0..2], .big);
-        }
-    }
-
-    pub fn save(e: *const Eeprom, out: *[eeprom_bytes]u8) void {
-        for (e.data, 0..) |word, i| std.mem.writeInt(u16, out[i * 2 ..][0..2], word, .big);
-    }
-};
-
-pub const Cps = struct {
+pub const Machine = struct {
     /// The battery's contents. Read-only once loaded.
     board: board.Board,
     /// The heap slices, the one exception to the no-allocation rule: reattached
     /// after a save state is loaded rather than copied into it.
     rom: romset.Set,
 
-    v: video.Video = .{},
+    v: chip.Video = .{},
     ram: [ram_bytes]u8 = @splat(0),
     /// The sound board is a board: its own CPU, its own ROM, its own RAM. The
     /// two shared windows below live on it, because that is the chip they are.
@@ -312,39 +131,16 @@ pub const Cps = struct {
     /// Where the resampled result piles up until `main.zig` drains it.
     mixer: audio.Mixer = .{},
 
-    inputs: Inputs = .{},
+    inputs: controls.Inputs = .{},
     /// The settings a board with no DIP switches keeps instead.
-    eeprom: Eeprom = .{},
+    eeprom: eeprom.Eeprom = .{},
     /// Coin counters and lockouts, latched. Nothing reads them back; they exist
     /// because a game writes them and the write must land somewhere.
     coin_control: u16 = 0,
     coin_control2: u16 = 0,
 
-    /// The reference clock, never reset, and where in the
-    /// picture we are.
-    ref: u64 = 0,
-    frame: u64 = 0,
-    line: u32 = 0,
-    /// Cycles the last line's final instruction ran past its budget, one per
-    /// CPU: neither core stops on a cycle boundary, so what it overran is owed
-    /// to the next line rather than forgiven.
-    cpu_over: u64 = 0,
-    sound_over: u64 = 0,
-    /// Reference ticks owed to the Z80's periodic interrupt and to the sound
-    /// chip's sample clock, carried the same way the CPUs carry cycles. Which
-    /// clock `sample_debt` counts is the board's: the QSound chip's, or the
-    /// OPM's.
-    sound_irq_debt: u64 = 0,
-    sample_debt: u64 = 0,
-    /// A CPS-1 board's Z80 does not divide the reference evenly either, so its
-    /// cycles are owed rather than budgeted, and the M6295 keeps a debt of its
-    /// own because it is the one chip here on a crystal nothing else shares.
-    sound_debt: u64 = 0,
-    oki_debt: u64 = 0,
-    /// The last sample the M6295 finished, held until it finishes another: it
-    /// runs at a seventh of the OPM's rate and the mix happens at the OPM's.
-    /// Wider than a sample, because the chip sums four voices without a limiter.
-    oki_out: i32 = 0,
+    /// Where in the picture the machine is, and what its chips are owed.
+    t: clock.Timing = .{},
 
     // The 68000 core reaches its bus by method call. The functions stay free.
     pub const read8 = file.read8;
@@ -355,12 +151,12 @@ pub const Cps = struct {
 
 // ------------------------------------------------------------------- reads
 
-pub fn read16(c: *Cps, addr: u24) u16 {
+pub fn read16(c: *Machine, addr: u24) u16 {
     return switch (addr) {
         program_lo...program_hi => peek(c.rom.program, addr - program_lo),
         in1_lo...in1_hi => in1(c),
         in0_lo...in0_hi => highByteWide(if (slot(addr) == in0_slot) in0(c) else dsw(c, slot(addr))),
-        cps_a_lo...cps_a_hi => video.readA(&c.v, @truncate(addr - cps_a_lo)),
+        cps_a_lo...cps_a_hi => chip.readA(&c.v, @truncate(addr - cps_a_lo)),
         cps_b_lo...cps_b_hi => cboard(c, @truncate(addr - cps_b_lo)),
         gfxram_lo...gfxram_hi => peek(&c.v.gfxram, addr - gfxram_lo),
         // The sample ROM seen a byte at a time through the sound board: a
@@ -381,7 +177,7 @@ pub fn read16(c: *Cps, addr: u24) u16 {
 
 /// A byte read takes whichever half of the word its address selects, which is
 /// the only way the CPU can see one byte of a 16-bit bus.
-pub fn read8(c: *Cps, addr: u24) u8 {
+pub fn read8(c: *Machine, addr: u24) u8 {
     const word = read16(c, addr & ~@as(u24, 1));
     if (addr & 1 == 0) return @truncate(word >> 8);
     return @truncate(word);
@@ -413,7 +209,7 @@ fn peekByte(bytes: []const u8, offset: u32) u8 {
 }
 
 /// Controls are wired to ground, so a pressed button reads as a zero.
-fn in1(c: *const Cps) u16 {
+fn in1(c: *const Machine) u16 {
     const low: u16 = c.inputs.pad[0] & lowMask(in1_player_bits);
     const high: u16 = c.inputs.pad[1] & lowMask(in1_player_bits);
     return ~(low | high << 8);
@@ -428,25 +224,25 @@ fn in1(c: *const Cps) u16 {
 /// ponytail: the same register is player 3 on a three-player cabinet, and this
 /// hands those games player 1's buttons 4 to 6 rather than the nothing they
 /// used to read. Split it when a third player is worth having.
-fn cboard(c: *Cps, offset: u8) u16 {
+fn cboard(c: *Machine, offset: u8) u16 {
     if (c.board.in2_offset) |off| {
         if (off == offset) return in2(c);
     }
     return video.readB(&c.v, &c.board, offset);
 }
 
-fn in2(c: *const Cps) u16 {
-    const low: u16 = (c.inputs.pad[0] >> in2_button_shift) & lowMask(button_count - in2_button_shift);
-    const high: u16 = (c.inputs.pad[1] >> in2_button_shift) & lowMask(button_count - in2_button_shift);
+fn in2(c: *const Machine) u16 {
+    const low: u16 = (c.inputs.pad[0] >> in2_button_shift) & lowMask(controls.button_count - in2_button_shift);
+    const high: u16 = (c.inputs.pad[1] >> in2_button_shift) & lowMask(controls.button_count - in2_button_shift);
     return ~(low | high << 4);
 }
 
 /// The DIP banks, which only a plain CPS-1 board carries.
-fn dsw(c: *const Cps, which: u24) u8 {
+fn dsw(c: *const Machine, which: u24) u8 {
     if (c.board.sound() != .cps1) return dsw_absent;
     return dsw_setting[which - 1];
 }
-fn in0(c: *const Cps) u8 {
+fn in0(c: *const Machine) u8 {
     var bits: u8 = 0;
     for (in0_bit, 0..) |bit, i| {
         if (c.inputs.panel & (@as(u8, 1) << @intCast(i)) != 0) bits |= bit;
@@ -460,23 +256,23 @@ fn lowMask(bits: u4) u16 {
 
 // ------------------------------------------------------------------ writes
 
-pub fn write16(c: *Cps, addr: u24, value: u16) void {
+pub fn write16(c: *Machine, addr: u24, value: u16) void {
     poke(c, addr, value, both_lanes);
 }
 
 /// The CPU drives the same byte onto both lanes; the address picks which of
 /// them the strobe lands on.
-pub fn write8(c: *Cps, addr: u24, value: u8) void {
+pub fn write8(c: *Machine, addr: u24, value: u8) void {
     const word = @as(u16, value) << 8 | value;
     poke(c, addr & ~@as(u24, 1), word, if (addr & 1 == 0) high_lane else low_lane);
 }
 
 /// `mask` is which halves of the data bus the CPU is driving.
-fn poke(c: *Cps, addr: u24, value: u16, mask: u16) void {
+fn poke(c: *Machine, addr: u24, value: u16, mask: u16) void {
     switch (addr) {
         coinctrl_lo...coinctrl_hi => merge(&c.coin_control, value, mask),
-        cps_a_lo...cps_a_hi => video.writeA(&c.v, &c.board, @truncate(addr - cps_a_lo), value, mask),
-        cps_b_lo...cps_b_hi => video.writeB(&c.v, &c.board, @truncate(addr - cps_b_lo), value, mask),
+        cps_a_lo...cps_a_hi => chip.writeA(&c.v, &c.board, @truncate(addr - cps_a_lo), value, mask),
+        cps_b_lo...cps_b_hi => chip.writeB(&c.v, &c.board, @truncate(addr - cps_b_lo), value, mask),
         // The first latch takes whichever lane the CPU drove — a driver posts
         // it with a byte write as often as a word one. The second is wired to
         // the low lane only.
@@ -493,7 +289,7 @@ fn poke(c: *Cps, addr: u24, value: u16, mask: u16) void {
         coinctrl2_lo...coinctrl2_hi => merge(&c.coin_control2, value, mask),
         // Byte-wide like the shared RAM beside it: the three EEPROM wires are
         // on the low lane, so an even-address byte write reaches none of them.
-        eeprom_lo...eeprom_hi => if (mask & low_lane != 0) c.eeprom.write(@truncate(value)),
+        eeprom_lo...eeprom_hi => if (mask & low_lane != 0) eepromPins(c, @truncate(value)),
         ram_lo...ram_hi => pokeBytes(&c.ram, addr - ram_lo, value, mask),
         else => {},
     }
@@ -519,7 +315,7 @@ fn pokeByteWide(bytes: []u8, offset: u32, value: u16, mask: u16) void {
 const testing = std.testing;
 
 /// A machine with no ROMs, for exercising the parts of the map that are RAM.
-fn bare() Cps {
+fn bare() Machine {
     return .{ .board = .{}, .rom = .{ .program = &.{}, .gfx = &.{}, .audio = &.{}, .qsound = &.{}, .oki = &.{} } };
 }
 
@@ -563,8 +359,8 @@ test "controls are wired to ground, so a pressed button reads as a zero" {
     try testing.expectEqual(@as(u16, 0xffff), read16(&c, in2_lo));
     try testing.expectEqual(@as(u16, 0xffff), read16(&c, in0_lo));
 
-    c.inputs.pad[0] = Button.up.mask() | Button.b1.mask() | Button.b6.mask();
-    c.inputs.pad[1] = Button.left.mask();
+    c.inputs.pad[0] = controls.Button.up.mask() | controls.Button.b1.mask() | controls.Button.b6.mask();
+    c.inputs.pad[1] = controls.Button.left.mask();
     // IN1 holds seven bits per player: the stick and the first three buttons.
     try testing.expectEqual(@as(u16, ~@as(u16, 0x0018 | 0x0200)), read16(&c, in1_lo));
     // Button 6 is on IN2 instead, four bits up for player 2.
@@ -580,7 +376,7 @@ test "controls are wired to ground, so a pressed button reads as a zero" {
     try testing.expectEqual(@as(u16, 0x1234), read16(&c, cps_b_lo + 0x34));
     c.board.in2_offset = null;
 
-    c.inputs.panel = Panel.coin1.mask() | Panel.start2.mask();
+    c.inputs.panel = controls.Panel.coin1.mask() | controls.Panel.start2.mask();
     try testing.expectEqual(@as(u16, 0xde), read8(&c, in0_lo));
     // The system inputs are byte-wide, and the DSW banks a QSound board has
     // none of read as all-ones.
@@ -600,34 +396,34 @@ test "a plain CPS-1 board has DIP switches, and the demo sounds one is on" {
 }
 /// Clocks one bit into the EEPROM the way a driver does: set the wire, raise
 /// the clock, drop it. Chip select stays asserted throughout.
-fn eepromBit(c: *Cps, bit: u1) void {
+fn eepromBit(c: *Machine, bit: u1) void {
     const di: u16 = if (bit == 1) eeprom_di else 0;
     write8(c, eeprom_lo + 1, @truncate(eeprom_cs | di));
     write8(c, eeprom_lo + 1, @truncate(eeprom_cs | eeprom_clk | di));
     write8(c, eeprom_lo + 1, @truncate(eeprom_cs | di));
 }
 
-fn eepromSend(c: *Cps, value: u32, bits: u5) void {
+fn eepromSend(c: *Machine, value: u32, bits: u5) void {
     var i = bits;
     while (i > 0) : (i -= 1) eepromBit(c, @truncate(value >> (i - 1)));
 }
 
-fn eepromSelect(c: *Cps, on: bool) void {
+fn eepromSelect(c: *Machine, on: bool) void {
     write8(c, eeprom_lo + 1, if (on) eeprom_cs else 0);
 }
 
 /// A command is a start bit, two opcode bits and six address bits.
-fn eepromCommand(c: *Cps, op: EepromOp, addr: u6) void {
+fn eepromCommand(c: *Machine, op: eeprom.Op, addr: u6) void {
     eepromSelect(c, true);
-    eepromSend(c, 1 << (eeprom_command_bits - 1) | @as(u32, @intFromEnum(op)) << 6 | addr, eeprom_command_bits);
+    eepromSend(c, 1 << (eeprom.command_bits - 1) | @as(u32, @intFromEnum(op)) << 6 | addr, eeprom.command_bits);
 }
 
-fn eepromRead(c: *Cps, addr: u6) !u16 {
+fn eepromRead(c: *Machine, addr: u6) !u16 {
     eepromCommand(c, .read, addr);
     // The chip answers with a dummy zero and then the word, MSB first.
     try testing.expectEqual(@as(u16, 0), read16(c, eeprom_lo) & 1);
     var word: u16 = 0;
-    for (0..eeprom_data_bits) |_| {
+    for (0..eeprom.data_bits) |_| {
         eepromBit(c, 0);
         word = word << 1 | @as(u16, @truncate(read16(c, eeprom_lo) & 1));
     }
@@ -638,56 +434,56 @@ fn eepromRead(c: *Cps, addr: u6) !u16 {
 test "the EEPROM answers the 93C46 protocol a service menu speaks" {
     var c = bare();
     // An erased chip, and a write refused until one is enabled.
-    try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 3));
+    try testing.expectEqual(@as(u16, eeprom.erased), try eepromRead(&c, 3));
     eepromCommand(&c, .write, 3);
-    eepromSend(&c, 0x1234, eeprom_data_bits);
+    eepromSend(&c, 0x1234, eeprom.data_bits);
     eepromSelect(&c, false);
-    try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 3));
+    try testing.expectEqual(@as(u16, eeprom.erased), try eepromRead(&c, 3));
     try testing.expect(!c.eeprom.dirty);
 
-    eepromCommand(&c, .special, @as(u6, @intFromEnum(EepromSpecial.enable)) << 4);
+    eepromCommand(&c, .special, @as(u6, @intFromEnum(eeprom.Special.enable)) << 4);
     eepromSelect(&c, false);
     eepromCommand(&c, .write, 3);
-    eepromSend(&c, 0x1234, eeprom_data_bits);
+    eepromSend(&c, 0x1234, eeprom.data_bits);
     eepromSelect(&c, false);
     try testing.expectEqual(@as(u16, 0x1234), try eepromRead(&c, 3));
     try testing.expect(c.eeprom.dirty);
     // Its neighbours are untouched, and so is the rest of the chip.
-    try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 4));
+    try testing.expectEqual(@as(u16, eeprom.erased), try eepromRead(&c, 4));
 
     eepromCommand(&c, .erase, 3);
     eepromSelect(&c, false);
-    try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 3));
+    try testing.expectEqual(@as(u16, eeprom.erased), try eepromRead(&c, 3));
 
     // Disabling holds across chip select, which is what stops a glitch from
     // wiping the settings.
-    eepromCommand(&c, .special, @as(u6, @intFromEnum(EepromSpecial.disable)) << 4);
+    eepromCommand(&c, .special, @as(u6, @intFromEnum(eeprom.Special.disable)) << 4);
     eepromSelect(&c, false);
     eepromCommand(&c, .write, 7);
-    eepromSend(&c, 0xbeef, eeprom_data_bits);
+    eepromSend(&c, 0xbeef, eeprom.data_bits);
     eepromSelect(&c, false);
-    try testing.expectEqual(@as(u16, eeprom_erased), try eepromRead(&c, 7));
+    try testing.expectEqual(@as(u16, eeprom.erased), try eepromRead(&c, 7));
 
     // The idle wire reads high, and nothing but bit 0 is driven at all.
     try testing.expectEqual(@as(u16, 0xffff), read16(&c, eeprom_lo));
 }
 
 test "the EEPROM round-trips through the file beside the set" {
-    var e = Eeprom{};
+    var e = eeprom.Eeprom{};
     e.data[0] = 0x0102;
-    e.data[eeprom_words - 1] = 0xfeed;
-    var bytes: [eeprom_bytes]u8 = undefined;
+    e.data[eeprom.words - 1] = 0xfeed;
+    var bytes: [eeprom.bytes]u8 = undefined;
     e.save(&bytes);
     try testing.expectEqualSlices(u8, &.{ 0x01, 0x02 }, bytes[0..2]);
 
-    var back = Eeprom{};
+    var back = eeprom.Eeprom{};
     back.load(&bytes);
     try testing.expectEqualSlices(u16, &e.data, &back.data);
 
     // A short file fills the front and leaves the rest erased.
     back.load(bytes[0..4]);
     try testing.expectEqual(@as(u16, 0x0102), back.data[0]);
-    try testing.expectEqual(@as(u16, eeprom_erased), back.data[eeprom_words - 1]);
+    try testing.expectEqual(@as(u16, eeprom.erased), back.data[eeprom.words - 1]);
 }
 
 test "program ROM is read-only and stops where the chips do" {

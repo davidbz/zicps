@@ -14,54 +14,54 @@ pub fn build(b: *std.Build) void {
     // it here, so a stray `@import("raylib")` in the emulation core does not
     // compile.
     const board = b.addModule("board", .{
-        .root_source_file = b.path("src/board.zig"),
+        .root_source_file = b.path("src/common/board.zig"),
         .target = target,
         .optimize = optimize,
     });
 
     const romset = b.addModule("romset", .{
-        .root_source_file = b.path("src/romset.zig"),
+        .root_source_file = b.path("src/common/romset.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "board", .module = board }},
     });
 
     const video = b.addModule("video", .{
-        .root_source_file = b.path("src/video.zig"),
+        .root_source_file = b.path("src/common/video.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "board", .module = board }},
     });
 
     const audio = b.addModule("audio", .{
-        .root_source_file = b.path("src/audio.zig"),
+        .root_source_file = b.path("src/common/audio.zig"),
         .target = target,
         .optimize = optimize,
     });
 
     const kabuki = b.addModule("kabuki", .{
-        .root_source_file = b.path("src/kabuki.zig"),
+        .root_source_file = b.path("src/common/kabuki.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "board", .module = board }},
     });
 
     const qsound = b.addModule("qsound", .{
-        .root_source_file = b.path("src/qsound.zig"),
+        .root_source_file = b.path("src/common/qsound.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "audio", .module = audio }},
     });
 
     const ym2151 = b.addModule("ym2151", .{
-        .root_source_file = b.path("src/ym2151.zig"),
+        .root_source_file = b.path("src/common/ym2151.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "audio", .module = audio }},
     });
 
     const oki = b.addModule("oki", .{
-        .root_source_file = b.path("src/oki.zig"),
+        .root_source_file = b.path("src/common/oki.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -70,7 +70,7 @@ pub fn build(b: *std.Build) void {
     // The 68000 side reaches it through shared RAM and nothing else, which is
     // what the hardware does too.
     const soundboard = b.addModule("soundboard", .{
-        .root_source_file = b.path("src/soundboard.zig"),
+        .root_source_file = b.path("src/common/soundboard.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -83,26 +83,26 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    const cps = b.addModule("cps", .{
-        .root_source_file = b.path("src/cps.zig"),
+    const controls = b.addModule("controls", .{
+        .root_source_file = b.path("src/common/controls.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{
-            .{ .name = "board", .module = board },
-            .{ .name = "romset", .module = romset },
-            .{ .name = "video", .module = video },
-            .{ .name = "audio", .module = audio },
-            .{ .name = "soundboard", .module = soundboard },
-        },
     });
 
-    const scheduler = b.addModule("scheduler", .{
-        .root_source_file = b.path("src/scheduler.zig"),
+    const eeprom = b.addModule("eeprom", .{
+        .root_source_file = b.path("src/common/eeprom.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // The clocks and the sound board's share of a line: the same on every
+    // generation, so it is wired without any machine and each machine's frame
+    // loop asks it for the parts it needs.
+    const clock = b.addModule("clock", .{
+        .root_source_file = b.path("src/common/clock.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "m68k", .module = z68k.module("m68k") },
-            .{ .name = "cps", .module = cps },
             .{ .name = "video", .module = video },
             .{ .name = "audio", .module = audio },
             .{ .name = "soundboard", .module = soundboard },
@@ -113,24 +113,70 @@ pub fn build(b: *std.Build) void {
     });
 
     const state = b.addModule("state", .{
-        .root_source_file = b.path("src/state.zig"),
+        .root_source_file = b.path("src/common/state.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "cps", .module = cps },
-            .{ .name = "scheduler", .module = scheduler },
+            .{ .name = "board", .module = board },
+            .{ .name = "romset", .module = romset },
+            .{ .name = "soundboard", .module = soundboard },
+            .{ .name = "audio", .module = audio },
         },
     });
 
     const input = b.addModule("input", .{
-        .root_source_file = b.path("src/input.zig"),
+        .root_source_file = b.path("src/common/input.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{.{ .name = "cps", .module = cps }},
+        .imports = &.{.{ .name = "controls", .module = controls }},
+    });
+
+    // CPS-1 and 1.5: the memory map, the object list and the starfields, and
+    // the order a line's four passes go down in. Nothing above this point knows
+    // which generation it is on.
+    const cps1_video = b.addModule("cps1_video", .{
+        .root_source_file = b.path("src/cps1/video.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "video", .module = video },
+        },
+    });
+
+    const cps1 = b.addModule("cps1", .{
+        .root_source_file = b.path("src/cps1/machine.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "romset", .module = romset },
+            .{ .name = "video", .module = video },
+            .{ .name = "audio", .module = audio },
+            .{ .name = "soundboard", .module = soundboard },
+            .{ .name = "controls", .module = controls },
+            .{ .name = "eeprom", .module = eeprom },
+            .{ .name = "clock", .module = clock },
+            .{ .name = "cps1_video", .module = cps1_video },
+        },
+    });
+
+    const scheduler = b.addModule("scheduler", .{
+        .root_source_file = b.path("src/cps1/scheduler.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "m68k", .module = z68k.module("m68k") },
+            .{ .name = "cps1", .module = cps1 },
+            .{ .name = "video", .module = video },
+            .{ .name = "cps1_video", .module = cps1_video },
+            .{ .name = "clock", .module = clock },
+            .{ .name = "soundboard", .module = soundboard },
+        },
     });
 
     const config = b.addModule("config", .{
-        .root_source_file = b.path("src/config.zig"),
+        .root_source_file = b.path("src/common/config.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "input", .module = input }},
@@ -147,7 +193,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const boards = b.addModule("boards", .{
-        .root_source_file = b.path("src/boards.zig"),
+        .root_source_file = b.path("src/common/boards.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -158,7 +204,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const snow = b.addModule("snow", .{
-        .root_source_file = b.path("src/ui/snow.zig"),
+        .root_source_file = b.path("src/common/ui/snow.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -188,9 +234,12 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "board", .module = board },
             .{ .name = "romset", .module = romset },
-            .{ .name = "cps", .module = cps },
+            .{ .name = "cps1", .module = cps1 },
+            .{ .name = "controls", .module = controls },
             .{ .name = "video", .module = video },
+            .{ .name = "cps1_video", .module = cps1_video },
             .{ .name = "scheduler", .module = scheduler },
+            .{ .name = "clock", .module = clock },
             .{ .name = "kabuki", .module = kabuki },
             .{ .name = "soundboard", .module = soundboard },
             .{ .name = "qsound", .module = qsound },
@@ -275,9 +324,9 @@ pub fn build(b: *std.Build) void {
     }
 
     const modules = [_]*std.Build.Module{
-        board,  romset, video,  cps,        scheduler, input,  config,
-        audio,  kabuki, qsound, soundboard, snow,      boards, system_tests,
-        ym2151, oki,    state,
+        board,  romset, video,  cps1,         cps1_video, scheduler, input,
+        config, audio,  kabuki, qsound,       soundboard, snow,      boards,
+        ym2151, oki,    state,  system_tests, clock,      controls,  eeprom,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });
@@ -297,7 +346,8 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "board", .module = board },
             .{ .name = "boards", .module = boards },
-            .{ .name = "cps", .module = cps },
+            .{ .name = "cps1", .module = cps1 },
+            .{ .name = "controls", .module = controls },
             .{ .name = "scheduler", .module = scheduler },
         },
     });
@@ -317,8 +367,9 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "board", .module = board },
             .{ .name = "boards", .module = boards },
-            .{ .name = "cps", .module = cps },
+            .{ .name = "cps1", .module = cps1 },
             .{ .name = "video", .module = video },
+            .{ .name = "cps1_video", .module = cps1_video },
         },
     });
     const video_diff = b.addExecutable(.{ .name = "video_diff", .root_module = video_diff_module });
@@ -366,7 +417,7 @@ pub fn build(b: *std.Build) void {
     // This links raylib because `shell.zig` imports its header, and runs
     // nothing that needs a display.
     const shell = b.createModule(.{
-        .root_source_file = b.path("src/ui/shell.zig"),
+        .root_source_file = b.path("src/common/ui/shell.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true, // raylib.h comes in through @cImport
@@ -385,9 +436,13 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "board", .module = board },
             .{ .name = "romset", .module = romset },
-            .{ .name = "cps", .module = cps },
+            .{ .name = "cps1", .module = cps1 },
             .{ .name = "scheduler", .module = scheduler },
+            .{ .name = "clock", .module = clock },
+            .{ .name = "controls", .module = controls },
+            .{ .name = "eeprom", .module = eeprom },
             .{ .name = "video", .module = video },
+            .{ .name = "cps1_video", .module = cps1_video },
             .{ .name = "audio", .module = audio },
             .{ .name = "input", .module = input },
             .{ .name = "config", .module = config },

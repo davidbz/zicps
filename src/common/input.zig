@@ -9,11 +9,11 @@
 //! 265 or 300.
 
 const std = @import("std");
-const cps = @import("cps");
+const controls = @import("controls");
 
 /// Everything a key can be bound to. Both players' buttons come first, each in
-/// `cps.Button` order so `padMask` is a shift rather than a switch, then the
-/// panel inputs in `cps.Panel` order, then the hotkeys.
+/// `controls.Button` order so `padMask` is a shift rather than a switch, then the
+/// panel inputs in `controls.Panel` order, then the hotkeys.
 pub const Action = enum {
     p1_right,
     p1_left,
@@ -58,12 +58,12 @@ pub const Action = enum {
 
     pub const count = @typeInfo(Action).@"enum".fields.len;
     pub const pads = 2;
-    pub const pad_count = cps.button_count;
+    pub const pad_count = controls.button_count;
     /// Where the panel and the hotkeys start.
     pub const panel_first = pads * pad_count;
-    pub const hotkey_first = panel_first + cps.panel_count;
+    pub const hotkey_first = panel_first + controls.panel_count;
 
-    /// The `cps.Inputs.pad` bit this action holds down, or 0 if it is not a
+    /// The `controls.Inputs.pad` bit this action holds down, or 0 if it is not a
     /// player's button.
     pub fn padMask(a: Action) u16 {
         const i = @intFromEnum(a);
@@ -71,7 +71,7 @@ pub const Action = enum {
         return @as(u16, 1) << @intCast(i % pad_count);
     }
 
-    /// The `cps.Inputs.panel` bit this action holds down, or 0.
+    /// The `controls.Inputs.panel` bit this action holds down, or 0.
     pub fn panelMask(a: Action) u8 {
         const i = @intFromEnum(a);
         if (i < panel_first or i >= hotkey_first) return 0;
@@ -128,8 +128,8 @@ pub const Bindings = [Action.count]u32;
 
 comptime {
     // The two orders this file's shifts depend on.
-    std.debug.assert(Action.p1_b1.padMask() == cps.Button.b1.mask());
-    std.debug.assert(Action.test_switch.panelMask() == cps.Panel.test_switch.mask());
+    std.debug.assert(Action.p1_b1.padMask() == controls.Button.b1.mask());
+    std.debug.assert(Action.test_switch.panelMask() == controls.Panel.test_switch.mask());
 }
 
 /// Arrows and two rows of three for player 1, and the panel keys an arcade
@@ -197,9 +197,9 @@ const key_f12 = 301;
 /// no 4, 5 or 6 bolted to it, so the machine is never handed those however the
 /// keyboard is bound — and the shell draws them as holes that never light.
 pub fn wiring(six: bool) u16 {
-    const all = (@as(u16, 1) << cps.button_count) - 1;
+    const all = (@as(u16, 1) << controls.button_count) - 1;
     if (six) return all;
-    return all & ~(cps.Button.b4.mask() | cps.Button.b5.mask() | cps.Button.b6.mask());
+    return all & ~(controls.Button.b4.mask() | controls.Button.b5.mask() | controls.Button.b6.mask());
 }
 
 /// Player `pad`'s buttons for this frame. `down` is the host's keyboard, which
@@ -300,11 +300,11 @@ pub fn keyCode(name: []const u8) ?u32 {
 const testing = std.testing;
 
 test "pad and panel bits line up with what the bus reads" {
-    try testing.expectEqual(cps.Button.up.mask(), Action.p1_up.padMask());
-    try testing.expectEqual(cps.Button.b6.mask(), Action.p1_b6.padMask());
-    try testing.expectEqual(cps.Button.b6.mask(), Action.p2_b6.padMask());
-    try testing.expectEqual(cps.Panel.coin1.mask(), Action.coin1.panelMask());
-    try testing.expectEqual(cps.Panel.start2.mask(), Action.start2.panelMask());
+    try testing.expectEqual(controls.Button.up.mask(), Action.p1_up.padMask());
+    try testing.expectEqual(controls.Button.b6.mask(), Action.p1_b6.padMask());
+    try testing.expectEqual(controls.Button.b6.mask(), Action.p2_b6.padMask());
+    try testing.expectEqual(controls.Panel.coin1.mask(), Action.coin1.panelMask());
+    try testing.expectEqual(controls.Panel.start2.mask(), Action.start2.panelMask());
     // An action is one or the other, never both.
     try testing.expectEqual(@as(u8, 0), Action.p1_up.panelMask());
     try testing.expectEqual(@as(u16, 0), Action.coin1.padMask());
@@ -319,22 +319,22 @@ test "bindings turn held keys into what the machine is handed" {
         }
     }.down;
     var b = defaults;
-    const p1 = cps.Button.b1.mask() | cps.Button.up.mask();
+    const p1 = controls.Button.b1.mask() | controls.Button.up.mask();
     try testing.expectEqual(p1, buttons(b, 0, &held));
-    try testing.expectEqual(cps.Panel.coin1.mask(), panel(b, &held));
+    try testing.expectEqual(controls.Panel.coin1.mask(), panel(b, &held));
 
     // Player 2 is unbound out of the box, and an unbound key is never held.
     try testing.expectEqual(@as(u16, 0), buttons(b, 1, &held));
     b[@intFromEnum(Action.p2_b1)] = 'K';
-    try testing.expectEqual(cps.Button.b1.mask(), buttons(b, 1, &held));
+    try testing.expectEqual(controls.Button.b1.mask(), buttons(b, 1, &held));
     try testing.expectEqual(p1, buttons(b, 0, &held));
 
     // A three-button panel cannot hand over the buttons it has no holes for,
     // and hands over everything it does.
     b[@intFromEnum(Action.p1_b6)] = 'A';
-    try testing.expectEqual(p1 | cps.Button.b6.mask(), buttons(b, 0, &held) & wiring(true));
+    try testing.expectEqual(p1 | controls.Button.b6.mask(), buttons(b, 0, &held) & wiring(true));
     try testing.expectEqual(p1, buttons(b, 0, &held) & wiring(false));
-    for ([_]cps.Button{ .up, .down, .left, .right, .b1, .b2, .b3 }) |btn| {
+    for ([_]controls.Button{ .up, .down, .left, .right, .b1, .b2, .b3 }) |btn| {
         try testing.expectEqual(btn.mask(), btn.mask() & wiring(false));
     }
 }

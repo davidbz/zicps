@@ -19,8 +19,10 @@
 const std = @import("std");
 const board = @import("board");
 const boards = @import("boards");
-const cps = @import("cps");
+const cps1 = @import("cps1");
+const controls = @import("controls");
 const video = @import("video");
+const cps1_video = @import("cps1_video");
 
 const usage = "usage: video_diff <set> <dump> [out.ppm]";
 
@@ -59,7 +61,7 @@ pub fn main(init: std.process.Init) !void {
 
     // The whole machine, for one field of it: `Video` is a third of a megabyte
     // and the stack is not where it goes.
-    const c = try arena.create(cps.Cps);
+    const c = try arena.create(cps1.Machine);
     c.* = .{ .board = machine.b, .rom = machine.rom };
 
     const frame = read(bytes, &c.v) catch |err|
@@ -112,19 +114,19 @@ fn word(bytes: []const u8, at: usize) u32 {
 /// end of a frame, where the board would have drawn the object list it took a
 /// frame earlier. A sprite that moved between the two frames is one frame
 /// ahead in this picture, and nothing else is.
-fn render(c: *cps.Cps, frame: u32) void {
-    c.frame = frame;
+fn render(c: *cps1.Machine, frame: u32) void {
+    c.t.frame = frame;
     video.copyPalette(&c.v, &c.board);
-    video.latchObjects(&c.v);
+    cps1_video.latchObjects(&c.v);
     for (0..video.lines_per_frame) |line| {
-        video.renderLine(&c.v, &c.board, c.rom.gfx, @intCast(line), c.frame);
+        cps1_video.renderLine(&c.v, &c.board, c.rom.gfx, @intCast(line), c.t.frame);
     }
 }
 
 /// What the registers say, next to the picture that came out of them: a
 /// picture that is wrong in a way a person can see is usually wrong in a way
 /// one of these lines already said.
-fn describe(gpa: std.mem.Allocator, c: *const cps.Cps, frame: u32, source: []const u8) void {
+fn describe(gpa: std.mem.Allocator, c: *const cps1.Machine, frame: u32, source: []const u8) void {
     const v = &c.v;
     std.debug.print("frame {d}, board file {s}\n", .{ frame, source });
     std.debug.print("  layer control {x:0>4}   palette control {x:0>4}\n", .{
