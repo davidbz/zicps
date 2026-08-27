@@ -614,14 +614,8 @@ fn windowed(
     } else null;
     defer if (replay) |r| gpa.free(r.log);
 
-    rl.InitWindow(windowW(cfg.scale), windowH(cfg.scale), "zicps");
-    if (!rl.IsWindowReady()) {
-        // Closing a window that never opened is a segfault, so leave first.
-        std.debug.print("no window (no display?); try --frames N --hash instead\n", .{});
-        return error.NoDisplay;
-    }
+    try openWindow(cfg);
     defer rl.CloseWindow();
-    rl.SetExitKey(rl.KEY_NULL); // Escape is the menu key, not the quit key
 
     // The stream, not the vsync, paces the loop while a game runs: no
     // SetTargetFPS, just `paceToAudio`. Without a device nothing ever drains
@@ -670,24 +664,45 @@ fn windowed(
         describeBoard(&w.ui, m, w.set);
     }
 
-    while (!rl.WindowShouldClose() and !w.quit and !cpu.halted) {
-        try serveRequest(&w);
-        refreshSlots(&w);
-        applyOptions(&w);
-        const running = try stepFrames(&w);
-        paceDrawing(&w, running);
-        drawFrame(&w);
+    try runLoop(&w);
+    try closeOut(&w);
+}
+
+/// The window itself, or nothing: closing one that never opened is a segfault,
+/// so a display that is not there is left rather than carried on with.
+fn openWindow(cfg: *const Config) !void {
+    rl.InitWindow(windowW(cfg.scale), windowH(cfg.scale), "zicps");
+    if (!rl.IsWindowReady()) {
+        std.debug.print("no window (no display?); try --frames N --hash instead\n", .{});
+        return error.NoDisplay;
+    }
+    rl.SetExitKey(rl.KEY_NULL); // Escape is the menu key, not the quit key
+}
+
+/// One drawn frame a turn: what the shell asked for, what the machine ran of
+/// it, and what is drawn of that.
+fn runLoop(w: *Window) !void {
+    while (!rl.WindowShouldClose() and !w.quit and !w.cpu.halted) {
+        try serveRequest(w);
+        refreshSlots(w);
+        applyOptions(w);
+        const running = try stepFrames(w);
+        paceDrawing(w, running);
+        drawFrame(w);
         // Nothing is reading the mixer when idle, and fast-forward is the one
         // case where outrunning the device is the point.
-        if (running and has_audio and !w.ui.fast) paceToAudio(c, io);
+        if (running and w.has_audio and !w.ui.fast) paceToAudio(w.c, w.io);
     }
+}
 
-    flushNv(io, c, w.set) catch |err| std.debug.print("cannot save settings: {t}\n", .{err});
-    if (w.log) |*r| try writeLog(io, args.record.?, r.items);
-    if (w.frames != 0) {
-        var sound = Sound{};
-        report(c, cpu, &sound, w.frames);
-    }
+/// The battery, the replay log and the run's own summary: what a window leaves
+/// behind on the way out.
+fn closeOut(w: *Window) !void {
+    flushNv(w.io, w.c, w.set) catch |err| std.debug.print("cannot save settings: {t}\n", .{err});
+    if (w.log) |*r| try writeLog(w.io, w.args.record.?, r.items);
+    if (w.frames == 0) return;
+    var sound = Sound{};
+    report(w.c, w.cpu, &sound, w.frames);
 }
 
 /// Whatever the shell asked for this frame.
@@ -783,29 +798,35 @@ fn applyOptions(w: *Window) void {
 /// Runs the machine for as long as this drawn frame is worth, and answers
 /// whether it ran at all.
 fn stepFrames(w: *Window) !bool {
+    // Whatever the panel ended the frame holding is what the menu draws lit,
+    // whether the machine ran or not.
+    defer {
+        w.ui.pad = w.c.inputs.pad[0];
+        w.ui.panel = w.c.inputs.panel;
+        w.ui.six = w.cfg.buttons == .six;
+    }
+
     const running = w.machine.* != null and !w.ui.open and (!w.ui.paused or w.ui.step);
     if (!running) {
         w.c.inputs = .{};
-    } else {
-        // A paused machine owes exactly one frame; a fast-forwarded one runs
-        // several per drawn frame. Either way the recording still gets one word
-        // per emulated frame, so a replay of it is a replay.
-        const steps: u32 = if (w.ui.step) 1 else if (w.ui.fast) fast_forward_frames else 1;
-        for (0..steps) |_| {
-            w.c.inputs = if (w.replay) |r| r.at(w.frames) else readPanel(w.cfg.*);
-            if (w.log) |*r| try record(r, w.gpa, w.c.inputs);
-            scheduler.runFrame(w.c, w.cpu);
-            w.frames += 1;
-            // Drained inside the loop: the ring holds well under a
-            // fast-forwarded burst, so it has to go out as it is made.
-            if (w.has_audio) drainAudio(w.c, w.stream);
-        }
-        w.ui.step = false;
+        return false;
     }
-    w.ui.pad = w.c.inputs.pad[0];
-    w.ui.panel = w.c.inputs.panel;
-    w.ui.six = w.cfg.buttons == .six;
-    return running;
+
+    // A paused machine owes exactly one frame; a fast-forwarded one runs
+    // several per drawn frame. Either way the recording still gets one word
+    // per emulated frame, so a replay of it is a replay.
+    const steps: u32 = if (w.ui.step or !w.ui.fast) 1 else fast_forward_frames;
+    for (0..steps) |_| {
+        w.c.inputs = if (w.replay) |r| r.at(w.frames) else readPanel(w.cfg.*);
+        if (w.log) |*r| try record(r, w.gpa, w.c.inputs);
+        scheduler.runFrame(w.c, w.cpu);
+        w.frames += 1;
+        // Drained inside the loop: the ring holds well under a
+        // fast-forwarded burst, so it has to go out as it is made.
+        if (w.has_audio) drainAudio(w.c, w.stream);
+    }
+    w.ui.step = false;
+    return true;
 }
 
 /// Idle and paused frames have no audio to pace against, so the timer takes

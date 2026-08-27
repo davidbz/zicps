@@ -1,4 +1,4 @@
-//! The video state differential of §10: a real game's graphics RAM and CPS-A/B
+//! The video state differential: a real game's graphics RAM and CPS-A/B
 //! register file, taken out of MAME at a chosen frame and rendered by this
 //! renderer.
 //!
@@ -9,7 +9,7 @@
 //! wrong or is the bus? With MAME's state in it, only the renderer is left.
 //!
 //! A dump is derived from a ROM nobody may redistribute, so it lives in
-//! gitignored `testdata/` and gates nothing (§10). Run by hand:
+//! gitignored `testdata/` and gates nothing. Run by hand:
 //!
 //!     zig build video-diff -- roms/dino.zip testdata/video/dino-0600.vdump
 //!

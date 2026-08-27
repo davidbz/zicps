@@ -1,6 +1,6 @@
 //! Save states: a small header and a straight copy of the machine's bytes.
 //!
-//! Because every chip is a plain fixed-size struct owned by value (§3.2), a
+//! Because every chip is a plain fixed-size struct owned by value, a
 //! state is `@memcpy` in both directions and there is no per-field serializer
 //! to forget a field in — which is the usual way save states rot. What it costs
 //! instead is that the file only means anything to the build that wrote it, so

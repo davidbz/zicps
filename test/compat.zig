@@ -12,7 +12,7 @@
 //!
 //! Two readings need reading carefully. A board in attract mode is silent on
 //! purpose — a CPS-1 board's demo sounds are off at the factory settings it
-//! runs on here (§5.1), and a QSound board's are off in a battery nobody has
+//! runs on here, and a QSound board's are off in a battery nobody has
 //! set up — so the sweep puts a coin in and presses start, and `silent` after
 //! that is a reading worth having. And a set drawing its own RAM test is a
 //! still picture that is not a blank one, which is why the stillness is

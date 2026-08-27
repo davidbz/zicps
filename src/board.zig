@@ -243,11 +243,20 @@ const Parser = struct {
     b: Board = .{},
     diag: *Diag,
     line_no: u32 = 0,
+    /// The key of the line being applied. Every helper below names it in its
+    /// message, and none of them can be reached from anywhere else.
+    key: []const u8 = "",
     seen_version: bool = false,
     // A board whose PAL decodes no priority mask at all writes the line out as
     // four `none`s, and a board file that forgot the line has not. The values
     // cannot tell those apart, so the line is remembered rather than read back.
     seen_priority: bool = false,
+
+    /// Everything wrong with a line is wrong at a line number, so the prefix
+    /// lives here instead of in thirty format strings.
+    fn bad(p: *Parser, comptime fmt: []const u8, args: anytype) Error {
+        return p.diag.say("line {d}: " ++ fmt, .{p.line_no} ++ args);
+    }
 };
 
 /// Parses a board file. Every failure carries a line number and the key that
@@ -270,73 +279,70 @@ pub fn parse(text: []const u8, diag: *Diag) Error!Board {
 
 /// One `key = value` line, whichever of the three kinds of key it names.
 fn parseLine(p: *Parser, line: []const u8) Error!void {
-    const diag = p.diag;
     const eq = std.mem.indexOfScalar(u8, line, '=') orelse
-        return diag.say("line {d}: expected `key = value`, got `{s}`", .{ p.line_no, line });
-    const key = trim(line[0..eq]);
+        return p.bad("expected `key = value`, got `{s}`", .{line});
+    p.key = trim(line[0..eq]);
     var vals = std.mem.tokenizeAny(u8, line[eq + 1 ..], " \t,");
 
-    const what = std.meta.stringToEnum(Key, key);
+    const what = std.meta.stringToEnum(Key, p.key);
     if (!p.seen_version and what != .version)
-        return diag.say("line {d}: expected `version = {d}` first; this does not look like a board file", .{ p.line_no, version });
+        return p.bad("expected `version = {d}` first; this does not look like a board file", .{version});
 
     if (what) |k| {
-        try applyKey(p, k, key, &vals);
-    } else if (std.meta.stringToEnum(Region, key)) |region| {
-        try addRom(&p.b, region, &vals, p.line_no, diag);
+        try applyKey(p, k, &vals);
+    } else if (std.meta.stringToEnum(Region, p.key)) |region| {
+        try addRom(p, region, &vals);
     } else {
-        return diag.say("line {d}: unknown key `{s}`", .{ p.line_no, key });
+        return p.bad("unknown key `{s}`", .{p.key});
     }
 
     if (vals.next()) |extra|
-        return diag.say("line {d}: `{s}` has more values than it takes, starting at `{s}`", .{ p.line_no, key, extra });
+        return p.bad("`{s}` has more values than it takes, starting at `{s}`", .{ p.key, extra });
 }
 
 /// What each key means, and how many values it takes.
-fn applyKey(p: *Parser, k: Key, key: []const u8, vals: *Tokens) Error!void {
+fn applyKey(p: *Parser, k: Key, vals: *Tokens) Error!void {
     const b = &p.b;
-    const line_no = p.line_no;
-    const diag = p.diag;
     switch (k) {
         .version => {
-            const v = try int(u32, vals, key, line_no, diag);
-            if (v != version) return diag.say("line {d}: board file version {d}, this build reads {d}", .{ line_no, v, version });
+            const v = try int(u32, p, vals);
+            if (v != version) return p.bad("board file version {d}, this build reads {d}", .{ v, version });
             p.seen_version = true;
         },
-        .layer_control => b.layer_control = try reg(vals, key, line_no, diag),
+        .layer_control => b.layer_control = try reg(p, vals),
         .priority => {
-            for (&b.priority) |*x| x.* = try reg(vals, key, line_no, diag);
+            for (&b.priority) |*x| x.* = try reg(p, vals);
             p.seen_priority = true;
         },
-        .palette_control => b.palette_control = try reg(vals, key, line_no, diag),
+        .palette_control => b.palette_control = try reg(p, vals),
         .id => {
-            b.id_offset = try reg(vals, key, line_no, diag);
-            b.id_value = try int(u16, vals, key, line_no, diag);
+            b.id_offset = try reg(p, vals);
+            b.id_value = try int(u16, p, vals);
         },
         .multiply => {
-            b.mult_factor1 = try reg(vals, key, line_no, diag);
-            b.mult_factor2 = try reg(vals, key, line_no, diag);
-            b.mult_result_lo = try reg(vals, key, line_no, diag);
-            b.mult_result_hi = try reg(vals, key, line_no, diag);
+            b.mult_factor1 = try reg(p, vals);
+            b.mult_factor2 = try reg(p, vals);
+            b.mult_result_lo = try reg(p, vals);
+            b.mult_result_hi = try reg(p, vals);
         },
-        .in2 => b.in2_offset = try reg(vals, key, line_no, diag),
-        .in3 => b.in3_offset = try reg(vals, key, line_no, diag),
-        .out2 => b.out2_offset = try reg(vals, key, line_no, diag),
+        .in2 => b.in2_offset = try reg(p, vals),
+        .in3 => b.in3_offset = try reg(p, vals),
+        .out2 => b.out2_offset = try reg(p, vals),
         .layer_enable => for (&b.layer_enable) |*m| {
-            m.* = try int(u16, vals, key, line_no, diag);
+            m.* = try int(u16, p, vals);
         },
         .raster_line => for (&b.raster_line) |*r| {
-            r.* = try reg(vals, key, line_no, diag);
+            r.* = try reg(p, vals);
         },
         .bank_sizes => for (&b.bank_sizes) |*s| {
-            s.* = try int(u32, vals, key, line_no, diag);
+            s.* = try int(u32, p, vals);
         },
-        .gfx_bank => try addRange(b, vals, line_no, diag),
+        .gfx_bank => try addRange(p, vals),
         .kabuki => b.kabuki = .{
-            .swap1 = try int(u32, vals, key, line_no, diag),
-            .swap2 = try int(u32, vals, key, line_no, diag),
-            .addr = try int(u16, vals, key, line_no, diag),
-            .xor = try int(u8, vals, key, line_no, diag),
+            .swap1 = try int(u32, p, vals),
+            .swap2 = try int(u32, p, vals),
+            .addr = try int(u16, p, vals),
+            .xor = try int(u8, p, vals),
         },
     }
 }
@@ -378,77 +384,88 @@ fn needsKabuki(b: *const Board, diag: *Diag) Error!void {
     }
 }
 
-fn addRange(b: *Board, vals: *Tokens, line_no: u32, diag: *Diag) Error!void {
+fn addRange(p: *Parser, vals: *Tokens) Error!void {
+    const b = &p.b;
     if (b.range_count == max_gfx_ranges)
-        return diag.say("line {d}: more than {d} `gfx_bank` ranges", .{ line_no, max_gfx_ranges });
+        return p.bad("more than {d} `gfx_bank` ranges", .{max_gfx_ranges});
 
     const types_text = vals.next() orelse
-        return diag.say("line {d}: `gfx_bank` needs <layers> <start> <end> <bank>", .{line_no});
+        return p.bad("`gfx_bank` needs <layers> <start> <end> <bank>", .{});
     var types: u8 = 0;
     var names = std.mem.tokenizeScalar(u8, types_text, '|');
     while (names.next()) |name| {
         const layer = std.meta.stringToEnum(Layer, name) orelse
-            return diag.say("line {d}: `{s}` is not a layer (" ++ nameList(Layer) ++ ")", .{ line_no, name });
+            return p.bad("`{s}` is not a layer (" ++ nameList(Layer) ++ ")", .{name});
         types |= @as(u8, 1) << @intFromEnum(layer);
     }
 
     const range = GfxRange{
         .types = types,
-        .start = try int(u32, vals, "gfx_bank", line_no, diag),
-        .end = try int(u32, vals, "gfx_bank", line_no, diag),
-        .bank = try int(u2, vals, "gfx_bank", line_no, diag),
+        .start = try int(u32, p, vals),
+        .end = try int(u32, p, vals),
+        .bank = try int(u2, p, vals),
     };
     if (range.end < range.start)
-        return diag.say("line {d}: `gfx_bank` range ends (0x{x}) before it starts (0x{x})", .{ line_no, range.end, range.start });
+        return p.bad("`gfx_bank` range ends (0x{x}) before it starts (0x{x})", .{ range.end, range.start });
 
     b.ranges[b.range_count] = range;
     b.range_count += 1;
 }
 
-fn addRom(b: *Board, region: Region, vals: *Tokens, line_no: u32, diag: *Diag) Error!void {
+fn addRom(p: *Parser, region: Region, vals: *Tokens) Error!void {
+    const b = &p.b;
     if (b.rom_count == max_roms)
-        return diag.say("line {d}: more than {d} ROM files", .{ line_no, max_roms });
-
-    const key = @tagName(region);
-    const dest = try int(u32, vals, key, line_no, diag);
-    const len = try int(u32, vals, key, line_no, diag);
-    const mode_text = vals.next() orelse
-        return diag.say("line {d}: `{s}` needs <dest> <length> <mode> <file> [<offset in file>]", .{ line_no, key });
-    const mode = std.meta.stringToEnum(Mode, mode_text) orelse
-        return diag.say("line {d}: `{s}` is not a load mode (" ++ nameList(Mode) ++ ")", .{ line_no, mode_text });
-    const name = vals.next() orelse
-        return diag.say("line {d}: `{s}` names no file", .{ line_no, key });
-
-    if (len == 0) return diag.say("line {d}: `{s}` loads {s} with nothing", .{ line_no, key, name });
-    if (mode == .word and len % 2 != 0)
-        return diag.say("line {d}: {s} is loaded as 16-bit words but its length (0x{x}) is odd", .{ line_no, name, len });
-    if (mode == .word64 and len % 2 != 0)
-        return diag.say("line {d}: {s} is loaded two bytes at a time but its length (0x{x}) is odd", .{ line_no, name, len });
+        return p.bad("more than {d} ROM files", .{max_roms});
 
     var rom = Rom{
         .region = region,
-        .dest = dest,
-        .len = len,
-        .mode = mode,
+        .dest = try int(u32, p, vals),
+        .len = try int(u32, p, vals),
+        .mode = try loadMode(p, vals),
         .src = 0,
-        .name = name,
+        .name = vals.next() orelse return p.bad("`{s}` names no file", .{p.key}),
     };
-    // What follows the file name is a file offset, a CRC, both, or neither, and
-    // a board file written by hand has neither.
-    var saw_src = false;
-    while (vals.next()) |extra| {
-        if (std.mem.startsWith(u8, extra, crc_prefix)) {
-            rom.crc = try num(u32, extra[crc_prefix.len..], key, line_no, diag);
-            continue;
-        }
-        if (saw_src)
-            return diag.say("line {d}: `{s}` has more values than it takes, starting at `{s}`", .{ line_no, key, extra });
-        rom.src = try num(u32, extra, key, line_no, diag);
-        saw_src = true;
-    }
+    try checkLength(p, rom);
+    try readExtras(p, vals, &rom);
 
     b.roms[b.rom_count] = rom;
     b.rom_count += 1;
+}
+
+/// How the chip's bytes are spread over the region they land in.
+fn loadMode(p: *Parser, vals: *Tokens) Error!Mode {
+    const text = vals.next() orelse
+        return p.bad("`{s}` needs <dest> <length> <mode> <file> [<offset in file>]", .{p.key});
+    const mode = std.meta.stringToEnum(Mode, text) orelse
+        return p.bad("`{s}` is not a load mode (" ++ nameList(Mode) ++ ")", .{text});
+    return mode;
+}
+
+/// A length the mode cannot load: nothing at all, or half of a word.
+fn checkLength(p: *Parser, rom: Rom) Error!void {
+    if (rom.len == 0) return p.bad("`{s}` loads {s} with nothing", .{ p.key, rom.name });
+    if (rom.len % 2 == 0) return;
+    switch (rom.mode) {
+        .word => return p.bad("{s} is loaded as 16-bit words but its length (0x{x}) is odd", .{ rom.name, rom.len }),
+        .word64 => return p.bad("{s} is loaded two bytes at a time but its length (0x{x}) is odd", .{ rom.name, rom.len }),
+        else => {},
+    }
+}
+
+/// What follows the file name is a file offset, a CRC, both, or neither, and a
+/// board file written by hand has neither.
+fn readExtras(p: *Parser, vals: *Tokens, rom: *Rom) Error!void {
+    var saw_src = false;
+    while (vals.next()) |extra| {
+        if (std.mem.startsWith(u8, extra, crc_prefix)) {
+            rom.crc = try num(u32, p, extra[crc_prefix.len..]);
+            continue;
+        }
+        if (saw_src)
+            return p.bad("`{s}` has more values than it takes, starting at `{s}`", .{ p.key, extra });
+        rom.src = try num(u32, p, extra);
+        saw_src = true;
+    }
 }
 
 const crc_prefix = "crc=";
@@ -466,28 +483,28 @@ fn trim(s: []const u8) []const u8 {
 
 /// `none` is how a board file says a register its PAL does not decode, which is
 /// not the same as leaving the line out.
-fn reg(vals: *Tokens, key: []const u8, line_no: u32, diag: *Diag) Error!Reg {
+fn reg(p: *Parser, vals: *Tokens) Error!Reg {
     const text = vals.next() orelse
-        return diag.say("line {d}: `{s}` needs a register offset", .{ line_no, key });
+        return p.bad("`{s}` needs a register offset", .{p.key});
     if (std.mem.eql(u8, text, "none")) return null;
     const v = std.fmt.parseInt(u8, text, 0) catch
-        return diag.say("line {d}: `{s}` wants a register offset or `none`, got `{s}`", .{ line_no, key, text });
+        return p.bad("`{s}` wants a register offset or `none`, got `{s}`", .{ p.key, text });
     if (v % 2 != 0)
-        return diag.say("line {d}: `{s}` offset 0x{x} is odd, and CPS-B registers are words", .{ line_no, key, v });
+        return p.bad("`{s}` offset 0x{x} is odd, and CPS-B registers are words", .{ p.key, v });
     if (v >= cps_b_bytes)
-        return diag.say("line {d}: `{s}` offset 0x{x} is past the end of the CPS-B window (0x{x})", .{ line_no, key, v, cps_b_bytes });
+        return p.bad("`{s}` offset 0x{x} is past the end of the CPS-B window (0x{x})", .{ p.key, v, cps_b_bytes });
     return v;
 }
 
-fn int(comptime T: type, vals: *Tokens, key: []const u8, line_no: u32, diag: *Diag) Error!T {
+fn int(comptime T: type, p: *Parser, vals: *Tokens) Error!T {
     const text = vals.next() orelse
-        return diag.say("line {d}: `{s}` needs another value", .{ line_no, key });
-    return num(T, text, key, line_no, diag);
+        return p.bad("`{s}` needs another value", .{p.key});
+    return num(T, p, text);
 }
 
-fn num(comptime T: type, text: []const u8, key: []const u8, line_no: u32, diag: *Diag) Error!T {
+fn num(comptime T: type, p: *Parser, text: []const u8) Error!T {
     return std.fmt.parseInt(T, text, 0) catch
-        return diag.say("line {d}: `{s}` cannot read `{s}` as a number that fits {s}", .{ line_no, key, text, @typeName(T) });
+        return p.bad("`{s}` cannot read `{s}` as a number that fits {s}", .{ p.key, text, @typeName(T) });
 }
 
 // ------------------------------------------------------------------- tests

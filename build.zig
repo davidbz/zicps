@@ -307,7 +307,7 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| sweep.addArgs(args);
     b.step("compat", "Boot every set in a directory and report what happened").dependOn(&sweep.step);
 
-    // The video state differential of §10: MAME's graphics RAM and register
+    // The video state differential: MAME's graphics RAM and register
     // file, rendered by this renderer. Also run by hand, against a dump that
     // is gitignored, and also gating nothing.
     const video_diff_module = b.createModule(.{
