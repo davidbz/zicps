@@ -24,7 +24,8 @@
 const std = @import("std");
 const board = @import("board");
 const boards = @import("boards");
-const cps = @import("cps");
+const cps1 = @import("cps1");
+const controls = @import("controls");
 const scheduler = @import("scheduler");
 
 const usage = "usage: compat <directory of sets> [--frames N]";
@@ -70,9 +71,9 @@ const Result = struct {
 /// The panel this frame: nothing, a coin, or start.
 fn panelAt(frame: u32, frames: u32) u8 {
     const coin_at = frames / 3;
-    if (frame >= coin_at and frame < coin_at + coin_hold) return cps.Panel.coin1.mask();
+    if (frame >= coin_at and frame < coin_at + coin_hold) return controls.Panel.coin1.mask();
     const since = std.math.sub(u32, frame, coin_at + start_gap) catch return 0;
-    return if (since % start_period < coin_hold) cps.Panel.start1.mask() else 0;
+    return if (since % start_period < coin_hold) controls.Panel.start1.mask() else 0;
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -101,7 +102,7 @@ pub fn main(init: std.process.Init) !void {
 
     // One machine, reused: two thirds of a megabyte, and nothing about a set
     // survives `startMachine` into the next one.
-    const c = try arena.create(cps.Cps);
+    const c = try arena.create(cps1.Machine);
     c.* = .{ .board = .{}, .rom = .{ .program = &.{}, .gfx = &.{}, .audio = &.{}, .qsound = &.{}, .oki = &.{} } };
 
     std.debug.print("{d} sets in {s}, {d} frames each\n\n", .{ names.len, path, frames });
@@ -168,7 +169,7 @@ fn lessThan(_: void, l: []const u8, r: []const u8) bool {
 /// Boots one set and watches it. The mixer is drained every frame whether or
 /// not anyone is listening: the ring is finite, and a run that let it fill
 /// would be a different machine from the one being swept.
-fn run(c: *cps.Cps, m: *const boards.Machine, frames: u32) Result {
+fn run(c: *cps1.Machine, m: *const boards.Machine, frames: u32) Result {
     c.* = .{ .board = m.b, .rom = m.rom };
     var cpu: scheduler.Cpu = .{};
     scheduler.reset(c, &cpu);
@@ -195,13 +196,13 @@ fn run(c: *cps.Cps, m: *const boards.Machine, frames: u32) Result {
 
 /// What the picture hashes to, which is the cheapest way to ask whether it
 /// moved. A hash is enough because nothing here says how it differs.
-fn picture(c: *const cps.Cps) u64 {
+fn picture(c: *const cps1.Machine) u64 {
     return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(&c.v.fb));
 }
 
 /// One colour from corner to corner: a board that never drew, or one that
 /// cleared the screen and stopped.
-fn flat(c: *const cps.Cps) bool {
+fn flat(c: *const cps1.Machine) bool {
     for (c.v.fb) |pixel| {
         if (pixel != c.v.fb[0]) return false;
     }
@@ -262,8 +263,8 @@ test "a coin goes in once, and start is pressed again and again after it" {
     for (0..900) |frame| {
         const now = panelAt(@intCast(frame), 900);
         if (now != last) {
-            if (now == cps.Panel.coin1.mask()) coins += 1;
-            if (now == cps.Panel.start1.mask()) starts += 1;
+            if (now == controls.Panel.coin1.mask()) coins += 1;
+            if (now == controls.Panel.start1.mask()) starts += 1;
         }
         last = now;
     }
@@ -271,12 +272,12 @@ test "a coin goes in once, and start is pressed again and again after it" {
     try testing.expectEqual(@as(u8, 0), panelAt(299, 900));
     try testing.expectEqual(@as(u32, 1), coins);
     try testing.expectEqual(@as(u32, 1 + (900 - 340 - 1) / start_period), starts);
-    try testing.expectEqual(cps.Panel.start1.mask(), panelAt(340, 900));
+    try testing.expectEqual(controls.Panel.start1.mask(), panelAt(340, 900));
     try testing.expectEqual(@as(u8, 0), panelAt(340 + coin_hold, 900));
 }
 
 test "a blank picture is one colour corner to corner" {
-    const c = try testing.allocator.create(cps.Cps);
+    const c = try testing.allocator.create(cps1.Machine);
     defer testing.allocator.destroy(c);
     c.* = .{ .board = .{}, .rom = .{ .program = &.{}, .gfx = &.{}, .audio = &.{}, .qsound = &.{}, .oki = &.{} } };
 

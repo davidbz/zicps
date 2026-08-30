@@ -8,13 +8,18 @@
 const std = @import("std");
 const board = @import("board");
 const romset = @import("romset");
-const cps = @import("cps");
+const cps1 = @import("cps1");
+const controls = @import("controls");
 const video = @import("video");
 const scheduler = @import("scheduler");
+const clock = @import("clock");
 const kabuki = @import("kabuki");
 const qsound = @import("qsound");
 const audio = @import("audio");
 const state = @import("state");
+
+/// The save-state format for this machine and its CPU.
+const st = state.Format(cps1.Machine, scheduler.Cpu);
 
 const testing = std.testing;
 
@@ -86,11 +91,11 @@ fn loadSet(tmp: *std.testing.TmpDir) !romset.Set {
 
 /// One frame of the control panel, packed the way an input log holds it.
 fn logWord(pad1: u16, panel: u8) u32 {
-    return @as(u32, pad1) | @as(u32, panel) << (2 * cps.button_count);
+    return @as(u32, pad1) | @as(u32, panel) << (2 * controls.button_count);
 }
 
 fn run(gpa: std.mem.Allocator, rom: romset.Set, b: board.Board, log: []const u32, frames: u32) !u64 {
-    const c = try gpa.create(cps.Cps);
+    const c = try gpa.create(cps1.Machine);
     defer gpa.destroy(c);
     c.* = .{ .board = b, .rom = rom };
 
@@ -102,8 +107,8 @@ fn run(gpa: std.mem.Allocator, rom: romset.Set, b: board.Board, log: []const u32
     for (0..frames) |frame| {
         const word = if (frame < log.len) log[frame] else 0;
         c.inputs = .{
-            .pad = .{ @truncate(word), @truncate(word >> cps.button_count) },
-            .panel = @truncate(word >> (2 * cps.button_count)),
+            .pad = .{ @truncate(word), @truncate(word >> controls.button_count) },
+            .panel = @truncate(word >> (2 * controls.button_count)),
         };
         scheduler.runFrame(c, &cpu);
     }
@@ -122,7 +127,7 @@ test "a set and its board file load, and the 68000 runs from its reset vector" {
     var diag = board.Diag{};
     const b = try board.parse(board_file, &diag);
 
-    const c = try testing.allocator.create(cps.Cps);
+    const c = try testing.allocator.create(cps1.Machine);
     defer testing.allocator.destroy(c);
     c.* = .{ .board = b, .rom = rom };
 
@@ -132,9 +137,9 @@ test "a set and its board file load, and the 68000 runs from its reset vector" {
     try testing.expectEqual(@as(u32, initial_sp), cpu.a[7]);
 
     // One frame of it, and the program has put the controls where it was told.
-    c.inputs.pad[0] = cps.Button.up.mask();
+    c.inputs.pad[0] = controls.Button.up.mask();
     scheduler.runFrame(c, &cpu);
-    try testing.expectEqual(cps.read16(c, cps.in1_lo), cps.read16(c, cps.ram_lo));
+    try testing.expectEqual(cps1.read16(c, cps1.in1_lo), cps1.read16(c, cps1.ram_lo));
 }
 
 test "two runs of the same input log are bit-identical" {
@@ -150,10 +155,10 @@ test "two runs of the same input log are bit-identical" {
 
     const frames = 30;
     const log = [_]u32{
-        logWord(cps.Button.up.mask(), 0),
-        logWord(cps.Button.up.mask() | cps.Button.b1.mask(), 0),
-        logWord(0, cps.Panel.coin1.mask()),
-        logWord(cps.Button.left.mask() | cps.Button.b6.mask(), cps.Panel.start1.mask()),
+        logWord(controls.Button.up.mask(), 0),
+        logWord(controls.Button.up.mask() | controls.Button.b1.mask(), 0),
+        logWord(0, controls.Panel.coin1.mask()),
+        logWord(controls.Button.left.mask() | controls.Button.b6.mask(), controls.Panel.start1.mask()),
     };
 
     const first = try run(testing.allocator, rom, b, &log, frames);
@@ -163,7 +168,7 @@ test "two runs of the same input log are bit-identical" {
     // And the log is genuinely driving the machine: a different one lands
     // somewhere else. Without this the test above passes on a machine that
     // ignores its inputs entirely.
-    const other = [_]u32{logWord(cps.Button.down.mask(), 0)};
+    const other = [_]u32{logWord(controls.Button.down.mask(), 0)};
     try testing.expect(try run(testing.allocator, rom, b, &other, frames) != first);
 }
 
@@ -195,7 +200,7 @@ const draw_table = 0x600;
 const draw_lists = 0x680;
 const draw_bytes = 0x4000;
 /// Exceptions push, so this one's stack cannot sit at the very bottom of RAM.
-const draw_sp = cps.ram_lo + 0x1000;
+const draw_sp = cps1.ram_lo + 0x1000;
 
 /// The scenes the ROM can be asked for, in the order the controls select them.
 const Page = enum { tilemaps, sprites, priority, order, rowscroll, stars, flip, raster };
@@ -207,12 +212,12 @@ comptime {
 }
 
 const draw_words = [_]u16{
-    0x43f9, draw_table >> 16, draw_table & 0xffff,
-    0x3039, cps.in1_lo >> 16, cps.in1_lo & 0xffff,
-    0x4640, 0x0240,           page_count - 1,
-    0xe548, 0x2071,           0x0000,
-    0x2018, 0x6706,           0x2240,
-    0x3298, 0x60f6,           0x46fc,
+    0x43f9, draw_table >> 16,  draw_table & 0xffff,
+    0x3039, cps1.in1_lo >> 16, cps1.in1_lo & 0xffff,
+    0x4640, 0x0240,            page_count - 1,
+    0xe548, 0x2071,            0x0000,
+    0x2018, 0x6706,            0x2240,
+    0x3298, 0x60f6,            0x46fc,
     0x2000, 0x60fe,
 };
 
@@ -227,7 +232,7 @@ const raster_handler = 0x520;
 /// Scroll3 is the one the raster page moves: its tiles are the ones still being
 /// drawn by the line the interrupt is programmed for.
 const scroll_home = 0x540;
-const raster_reg_addr = cps.cps_a_lo + video.scroll3_x;
+const raster_reg_addr = cps1.cps_a_lo + video.scroll3_x;
 
 ///     move.w (scroll_home).l, (scroll3_x).l
 ///     rte
@@ -388,13 +393,13 @@ const Script = struct {
         s.n += 1;
     }
     fn gfxram(s: *Script, at: u32, value: u16) void {
-        s.add(cps.gfxram_lo + at, value);
+        s.add(cps1.gfxram_lo + at, value);
     }
     fn rega(s: *Script, offset: u8, value: u16) void {
-        s.add(cps.cps_a_lo + @as(u32, offset), value);
+        s.add(cps1.cps_a_lo + @as(u32, offset), value);
     }
     fn regb(s: *Script, offset: u8, value: u16) void {
-        s.add(cps.cps_b_lo + @as(u32, offset), value);
+        s.add(cps1.cps_b_lo + @as(u32, offset), value);
     }
 };
 
@@ -429,12 +434,12 @@ fn commonPokes(s: *Script) void {
 
     for (0..3) |layer| tileBlock(s, layer, 0);
     for (0..3) |layer| {
-        s.rega(base_regs[layer], @intCast((cps.gfxram_lo + name_tables[layer]) / 256));
+        s.rega(base_regs[layer], @intCast((cps1.gfxram_lo + name_tables[layer]) / 256));
         s.rega(scroll_regs[layer][0], scrolls[layer][0]);
         s.rega(scroll_regs[layer][1], scrolls[layer][1]);
     }
 
-    s.rega(video.obj_base, (cps.gfxram_lo + object_list) / 256);
+    s.rega(video.obj_base, (cps1.gfxram_lo + object_list) / 256);
     s.gfxram(object_list + 6, sprite_end);
 }
 
@@ -481,7 +486,7 @@ const rowscroll_lines = 32;
 const rowscroll_step = 2;
 
 fn rowscrollPokes(s: *Script) void {
-    s.rega(video.rowscroll_base, (cps.gfxram_lo + rowscroll_table) / 256);
+    s.rega(video.rowscroll_base, (cps1.gfxram_lo + rowscroll_table) / 256);
     s.rega(video.rowscroll_offset, 0);
     for (0..rowscroll_lines) |i| {
         const line: u32 = @intCast(video.first_visible_line + i);
@@ -502,7 +507,7 @@ fn finishPokes(s: *Script, control: u16, video_control: u16) void {
     s.regb(palette_control, (1 << video.palette_pages) - 1);
     s.regb(layer_control, control);
     s.rega(video.video_control, video_control);
-    s.rega(video.palette_base, (cps.gfxram_lo + palette_src) / 256);
+    s.rega(video.palette_base, (cps1.gfxram_lo + palette_src) / 256);
 }
 
 fn pageScript(page: Page) Script {
@@ -645,7 +650,7 @@ fn writeDrawSet(dir: std.Io.Dir) !void {
 const red_mask = 0xff;
 const nibble_to_byte = 0x11;
 
-fn scores(c: *const cps.Cps) [video.palette_pages]u32 {
+fn scores(c: *const cps1.Machine) [video.palette_pages]u32 {
     var out: [video.palette_pages]u32 = @splat(0);
     for (c.v.fb) |pixel| {
         const red = pixel & red_mask;
@@ -656,7 +661,7 @@ fn scores(c: *const cps.Cps) [video.palette_pages]u32 {
     return out;
 }
 
-fn lineHash(c: *const cps.Cps, y: u32) u64 {
+fn lineHash(c: *const cps1.Machine, y: u32) u64 {
     return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(c.v.fb[y * video.width ..][0..video.width]));
 }
 
@@ -669,7 +674,7 @@ const deepest_line = 90;
 /// reloaded at the top of the frame after they are programmed.
 const page_frames = 3;
 
-fn runPage(c: *cps.Cps, cpu: *scheduler.Cpu, page: Page) void {
+fn runPage(c: *cps1.Machine, cpu: *scheduler.Cpu, page: Page) void {
     scheduler.reset(c, cpu);
     c.inputs.pad[0] = @intFromEnum(page);
     for (0..page_frames) |_| scheduler.runFrame(c, cpu);
@@ -701,7 +706,7 @@ test "the test ROM draws its three tilemaps" {
     const b, var rom = try loadDrawSet(&tmp);
     defer rom.deinit(testing.allocator);
 
-    const c = try testing.allocator.create(cps.Cps);
+    const c = try testing.allocator.create(cps1.Machine);
     defer testing.allocator.destroy(c);
     c.* = .{ .board = b, .rom = rom };
 
@@ -759,7 +764,7 @@ test "scoreboard: every page of the test ROM draws what it drew" {
     const b, var rom = try loadDrawSet(&tmp);
     defer rom.deinit(testing.allocator);
 
-    const c = try testing.allocator.create(cps.Cps);
+    const c = try testing.allocator.create(cps1.Machine);
     defer testing.allocator.destroy(c);
     c.* = .{ .board = b, .rom = rom };
     var cpu: scheduler.Cpu = .{};
@@ -1110,7 +1115,7 @@ test "a sound driver takes a command from the 68000 and sets a channel up" {
     const b, var rom = try loadSoundSet(&tmp);
     defer rom.deinit(testing.allocator);
 
-    const c = try testing.allocator.create(cps.Cps);
+    const c = try testing.allocator.create(cps1.Machine);
     defer testing.allocator.destroy(c);
     c.* = .{ .board = b, .rom = rom };
 
@@ -1148,7 +1153,7 @@ test "the sound board runs at its own speed, and the pipeline runs at the machin
     const b, var rom = try loadSoundSet(&tmp);
     defer rom.deinit(testing.allocator);
 
-    const c = try testing.allocator.create(cps.Cps);
+    const c = try testing.allocator.create(cps1.Machine);
     defer testing.allocator.destroy(c);
     c.* = .{ .board = b, .rom = rom };
 
@@ -1163,19 +1168,19 @@ test "the sound board runs at its own speed, and the pipeline runs at the machin
 
     // The Z80 got its line's worth of cycles every line, give or take the
     // instruction that straddled the boundary.
-    const want_cycles = scheduler.sound_per_line * video.lines_per_frame * sound_frames;
+    const want_cycles = clock.sound_per_line * video.lines_per_frame * sound_frames;
     try testing.expect(c.sound.cpu.cycles >= want_cycles);
-    try testing.expect(c.sound.cpu.cycles - want_cycles < scheduler.sound_per_line);
+    try testing.expect(c.sound.cpu.cycles - want_cycles < clock.sound_per_line);
 
     // Its interrupt arrived at 250 Hz: five frames of 59.6374 Hz is 20.96 of
     // them, and the handler counted them where the 68000 can read the count.
-    const want_ticks = 250 * sound_frames * scheduler.refresh_den / scheduler.refresh_num;
+    const want_ticks = 250 * sound_frames * clock.refresh_den / clock.refresh_num;
     try testing.expectEqual(@as(u8, want_ticks), c.sound.shared[1][0]);
 
     // And the chip's 24.038 kHz came out as 48 kHz, at the rate a machine
     // running at 59.6374 Hz produces it: one frame's worth of sound per frame,
     // which is what paces the machine once there is a device to play it on.
-    const per_frame = @as(u64, audio.sample_rate) * scheduler.refresh_den / scheduler.refresh_num;
+    const per_frame = @as(u64, audio.sample_rate) * clock.refresh_den / clock.refresh_num;
     const want_frames = per_frame * sound_frames;
     try testing.expect(frames > want_frames - 8 and frames < want_frames + 8);
 }
@@ -1195,7 +1200,7 @@ test "the sound board runs at its own speed, and the pipeline runs at the machin
 /// fail it the same way otherwise.
 const Audio = struct { frames: u64, hash: u64, peak: u32 };
 
-fn listen(c: *cps.Cps, cpu: *scheduler.Cpu, frames: usize) Audio {
+fn listen(c: *cps1.Machine, cpu: *scheduler.Cpu, frames: usize) Audio {
     var h = std.hash.Wyhash.init(0);
     var heard = Audio{ .frames = 0, .hash = 0, .peak = 0 };
     for (0..frames) |_| {
@@ -1218,7 +1223,7 @@ test "the chip plays the channel the driver set up, and a mute takes it out" {
     const b, var rom = try loadSoundSet(&tmp);
     defer rom.deinit(testing.allocator);
 
-    const c = try testing.allocator.create(cps.Cps);
+    const c = try testing.allocator.create(cps1.Machine);
     defer testing.allocator.destroy(c);
     c.* = .{ .board = b, .rom = rom };
 
@@ -1254,7 +1259,7 @@ test "the chip plays the channel the driver set up, and a mute takes it out" {
 /// same pair whether the machine was run into that point or loaded into it.
 const Run = struct { hash: u64, heard: Audio };
 
-fn playOn(c: *cps.Cps, cpu: *scheduler.Cpu, frames: usize) Run {
+fn playOn(c: *cps1.Machine, cpu: *scheduler.Cpu, frames: usize) Run {
     const heard = listen(c, cpu, frames);
     return .{ .hash = scheduler.hash(c, cpu), .heard = heard };
 }
@@ -1265,7 +1270,7 @@ test "a save state round-trips the machine bit for bit, and a foreign one is ref
     const b, var rom = try loadSoundSet(&tmp);
     defer rom.deinit(testing.allocator);
 
-    const c = try testing.allocator.create(cps.Cps);
+    const c = try testing.allocator.create(cps1.Machine);
     defer testing.allocator.destroy(c);
     c.* = .{ .board = b, .rom = rom };
 
@@ -1277,9 +1282,9 @@ test "a save state round-trips the machine bit for bit, and a foreign one is ref
     // its command and the chip is part way through a sample.
     _ = listen(c, &cpu, sound_frames);
 
-    const file = try testing.allocator.create([state.bytes]u8);
+    const file = try testing.allocator.create([st.bytes]u8);
     defer testing.allocator.destroy(file);
-    state.save(c, &cpu, file);
+    st.save(c, &cpu, file);
 
     const ran = playOn(c, &cpu, sound_frames);
 
@@ -1289,25 +1294,25 @@ test "a save state round-trips the machine bit for bit, and a foreign one is ref
     try testing.expect(scheduler.hash(c, &cpu) != ran.hash);
 
     // Out to a slot file and back in the way the shell does it, rather than
-    // straight out of the buffer. A state is exactly `state.bytes` long and
+    // straight out of the buffer. A state is exactly `st.bytes` long and
     // `readFileAlloc` refuses a stream that *reaches* its cap, so a read
     // capped at that number is one that refuses every state ever written —
     // which is what shipped, and passed a test that never touched a file.
     try tmp.dir.writeFile(testing.io, .{ .sub_path = slot_file, .data = file });
-    const read = try tmp.dir.readFileAlloc(testing.io, slot_file, testing.allocator, state.limit);
+    const read = try tmp.dir.readFileAlloc(testing.io, slot_file, testing.allocator, st.limit);
     defer testing.allocator.free(read);
-    try testing.expectEqual(@as(usize, state.bytes), read.len);
+    try testing.expectEqual(@as(usize, st.bytes), read.len);
 
-    try state.load(c, &cpu, read);
+    try st.load(c, &cpu, read);
     try testing.expectEqual(ran, playOn(c, &cpu, sound_frames));
 
     // And a state whose machine has a different shape is refused rather than
     // loaded as garbage. The layout hash is in the header, so finding it is
     // finding those eight bytes rather than knowing where they sit.
-    var stamp = std.mem.toBytes(std.mem.nativeToLittle(u64, state.layout_hash));
+    var stamp = std.mem.toBytes(std.mem.nativeToLittle(u64, st.layout_hash));
     const at = std.mem.indexOf(u8, file[0..header_search], &stamp).?;
     file[at] +%= 1;
-    try testing.expectError(error.FromAnotherBuild, state.load(c, &cpu, file));
+    try testing.expectError(error.FromAnotherBuild, st.load(c, &cpu, file));
 }
 
 /// How far into a state to look for the header's own fields. Comfortably past
