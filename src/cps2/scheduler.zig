@@ -1,35 +1,37 @@
-//! CPS-1's frame loop: what happens in a line, and in what order.
+//! CPS-2's frame loop: what happens in a line, and in what order.
 //!
-//! The clocks themselves and the sound board's share of a line are the same on
-//! every generation and live in `common/clock.zig`. What is this board's is the
-//! order: the 68000 gets the line, then the sound board, then the line is drawn
-//! with whatever the CPU left in the registers, and only then are the two
-//! interrupt pins set for the line after.
+//! The clocks and the sound board's share of a line are the same on every
+//! generation and live in `common/clock.zig` — `runSound`'s QSound arm is the
+//! same call CPS-1 makes, because it is the same sound board. What is this
+//! board's is the order, and one thing CPS-1 does not do at all: the program is
+//! decrypted here, once, at power-on, because this is the first moment the key
+//! and the ROM it opens are in the same place.
+//!
+//! No line is drawn yet. The picture is M12, and until then a CPS-2 machine
+//! runs, counts, keeps time and makes sound over a blank screen.
 
 const std = @import("std");
 const m68k = @import("m68k");
-const cps1 = @import("cps1");
-/// The CPS-A/CPS-B pair the whole family shares, and this board's half of it.
+const board = @import("board");
+const cps2 = @import("cps2");
+const crypt = @import("cps2_crypt");
+/// The CPS-A/CPS-B pair the whole family shares.
 const chip = @import("video");
-const video = @import("cps1_video");
 const clock = @import("clock");
 const soundboard = @import("soundboard");
 
-const Core = m68k.Core(cps1.Machine);
+const Core = m68k.Core(cps2.Machine);
 
 /// Re-exported so nothing downstream needs the CPU package wired in just to
 /// name the register file it hands us.
 pub const Cpu = m68k.Cpu;
 
-/// Vblank on the line after the last visible one, the raster counters at
-/// whatever line they were programmed for, and — when the two land together —
-/// both pins at once, which the 68000 reads as level 6.
-pub const vint_level = 2;
-pub const rint_level = 4;
-pub const vblank_line = chip.first_visible_line + chip.height;
+pub const vint_level = clock.vint_level;
+pub const rint_level = clock.rint_level;
+pub const vblank_line = clock.vblank_line;
 
 /// Runs one whole frame, line by line.
-pub fn runFrame(c: *cps1.Machine, cpu: *m68k.Cpu) void {
+pub fn runFrame(c: *cps2.Machine, cpu: *m68k.Cpu) void {
     c.t.line = 0;
     while (c.t.line < chip.lines_per_frame) : (c.t.line += 1) {
         runLine(c, cpu);
@@ -38,51 +40,56 @@ pub fn runFrame(c: *cps1.Machine, cpu: *m68k.Cpu) void {
     c.t.frame +%= 1;
 }
 
-fn runLine(c: *cps1.Machine, cpu: *m68k.Cpu) void {
-    // Half this library is a 10 MHz board and half a 12 MHz one, and which is
-    // which is a line in the board file.
-    clock.runCpu(cps1.Machine, c, cpu, c.board.cpu_hz);
+fn runLine(c: *cps2.Machine, cpu: *m68k.Cpu) void {
+    clock.runCpu(cps2.Machine, c, cpu, c.board.cpu_hz);
     clock.runSound(&c.t, &c.sound, &c.mixer);
 
-    // Line, then interrupts: what the CPU wrote during a line is on screen for
-    // that line, and an interrupt raised at the end of one is taken from the
-    // start of the next.
-    video.renderLine(&c.v, &c.board, c.rom.gfx, c.t.line, c.t.frame);
-
-    // The object list is double-buffered, and vblank is when the chip takes its
-    // copy: sprites written during a frame are drawn in the next one.
-    if (c.t.line == vblank_line) video.latchObjects(&c.v);
-
-    // ponytail: an interrupt is dropped after one line if the CPU never took
-    // it, where the real board holds it until the acknowledge cycle. A game
-    // that masks the level across all 768 cycles of the line misses that
-    // frame. Add an acknowledge callback to z68k if one ever turns out to.
+    // The raster counters are the same two down-counters CPS-B has always had,
+    // and vblank is on the line after the last visible one. An interrupt raised
+    // at the end of a line is taken from the start of the next.
     var level: u3 = 0;
     if (chip.rasterDue(&c.v, &c.board, c.t.line)) level |= rint_level;
     if (c.t.line == vblank_line) level |= vint_level;
     Core.setIpl(cpu, level);
 }
 
-/// Fills the reset vector and puts the 68000 on it, and hands the sound board
-/// its ROM: the Kabuki key is the board's, so this is the first moment both
-/// halves of the machine are in one place.
-pub fn reset(c: *cps1.Machine, cpu: *m68k.Cpu) void {
+/// Power-on: the program is decrypted, the 68000 is put on its reset vector and
+/// the sound board is handed its ROM, which on this generation is in clear.
+pub fn reset(c: *cps2.Machine, cpu: *m68k.Cpu) void {
+    decrypt(c);
+
     cpu.* = .{};
     Core.reset(cpu, c);
 
     soundboard.reset(&c.sound);
-    const kind = c.board.sound();
-    const samples = if (kind == .cps1) c.rom.oki else c.rom.qsound;
-    soundboard.load(&c.sound, kind, c.rom.audio, samples, c.board.kabuki);
+    soundboard.load(&c.sound, .qsound, c.rom.audio, c.rom.qsound, null);
+}
+
+/// Fills the opcode view of the program. A set loaded with no room for one —
+/// every test in this repo, and any CPS-1 set — is left reading its opcodes out
+/// of the program itself, which is a board with no cipher rather than a broken
+/// one.
+///
+/// ponytail: this is 65,536 key schedules and a pass over 4 MiB, which is under
+/// a tenth of a second in a release build and two thirds of one in a debug
+/// build, taken again on every reset. Cache it on the set if a reset ever feels
+/// slow enough to notice.
+fn decrypt(c: *cps2.Machine) void {
+    const key = crypt.readKey(c.rom.key);
+    c.suicided = key.dead;
+    if (c.rom.decrypted.ptr == c.rom.program.ptr) return;
+    crypt.decrypt(c.rom.program, c.rom.decrypted, key);
 }
 
 /// Everything a frame can have changed, in one number: what `--frames N` prints
-/// and what a replay is compared on. More than the picture, so
-/// that a divergence which has not reached the screen yet is still caught.
-pub fn hash(c: *const cps1.Machine, cpu: *const m68k.Cpu) u64 {
+/// and what a replay is compared on.
+pub fn hash(c: *const cps2.Machine, cpu: *const m68k.Cpu) u64 {
     var h = std.hash.Wyhash.init(0);
     h.update(std.mem.sliceAsBytes(&c.v.fb));
     h.update(&c.ram);
+    h.update(&c.extra);
+    h.update(std.mem.sliceAsBytes(&c.objram));
+    h.update(std.mem.sliceAsBytes(&c.output));
     h.update(std.mem.sliceAsBytes(&c.v.gfxram));
     h.update(std.mem.sliceAsBytes(&c.v.palette));
     h.update(std.mem.sliceAsBytes(&c.v.a));
@@ -92,23 +99,12 @@ pub fn hash(c: *const cps1.Machine, cpu: *const m68k.Cpu) u64 {
     h.update(std.mem.asBytes(&cpu.pc));
     h.update(std.mem.asBytes(&cpu.cycles));
     // The sound board is state the picture cannot show, which is the whole
-    // reason the hash is more than the framebuffer: a driver that has gone off
-    // the rails diverges here frames before anything else notices.
+    // reason the hash is more than the framebuffer.
     h.update(std.mem.sliceAsBytes(&c.sound.shared));
     h.update(std.mem.sliceAsBytes(&c.sound.q.regs));
-    // And the chip's own state, not only what was written at it: a voice that
-    // has walked to the wrong place in the sample ROM is a divergence the
-    // register file cannot see.
     h.update(std.mem.sliceAsBytes(&c.sound.q.voice));
     h.update(std.mem.sliceAsBytes(&c.sound.q.pan));
     h.update(std.mem.asBytes(&c.sound.q.out));
-    // And the other board's two chips, for the same reason: the OPM's
-    // envelopes and the M6295's position in a phrase are both state a driver
-    // can walk off the end of without anything on screen moving.
-    h.update(std.mem.sliceAsBytes(&c.sound.ym.op));
-    h.update(std.mem.sliceAsBytes(&c.sound.ym.ch));
-    h.update(std.mem.sliceAsBytes(&c.sound.m6295.voice));
-    h.update(std.mem.asBytes(&c.sound.latch));
     h.update(std.mem.asBytes(&c.sound.cpu.pc));
     h.update(std.mem.asBytes(&c.sound.cpu.cycles));
     return h.final();
@@ -118,8 +114,9 @@ pub fn hash(c: *const cps1.Machine, cpu: *const m68k.Cpu) u64 {
 
 const testing = std.testing;
 
-/// A program ROM that spins on itself, with a stack pointer and a reset vector
-/// ahead of it. Enough to prove the 68000 starts where the board tells it to.
+/// A program that spins on itself, with a stack pointer and a reset vector
+/// ahead of it. The 68000 fetches all three out of the opcode window, so this
+/// is also what proves the two views are the same when nothing decrypts.
 fn spinRom() [0x408]u8 {
     var rom: [0x408]u8 = @splat(0);
     std.mem.writeInt(u32, rom[0..4], 0x00ff0000, .big);
@@ -129,14 +126,17 @@ fn spinRom() [0x408]u8 {
     return rom;
 }
 
-fn spinning(rom: []u8) cps1.Machine {
-    return .{
-        .board = .{},
-        .rom = .{ .program = rom, .gfx = &.{}, .audio = &.{}, .qsound = &.{}, .oki = &.{} },
+fn spinning(rom: []u8) cps2.Machine {
+    var c = cps2.Machine{
+        .board = .{ .system = .cps2, .cpu_hz = board.cps2_cpu_hz },
+        .rom = .empty,
     };
+    c.rom.program = rom;
+    c.rom.decrypted = rom;
+    return c;
 }
 
-test "the 68000 starts at its reset vector" {
+test "the 68000 starts at its reset vector, out of the opcode window" {
     var rom = spinRom();
     var c = spinning(&rom);
     var cpu: m68k.Cpu = .{};
@@ -144,9 +144,11 @@ test "the 68000 starts at its reset vector" {
 
     try testing.expectEqual(@as(u32, 0x00000400), cpu.pc);
     try testing.expectEqual(@as(u32, 0x00ff0000), cpu.a[7]);
+    // No key ROM at all reads as a board whose battery has gone.
+    try testing.expect(c.suicided);
 }
 
-test "a frame runs a frame's worth of cycles, and the remainder carries" {
+test "a frame runs a 16 MHz frame's worth of cycles, and the remainder carries" {
     var rom = spinRom();
     var c = spinning(&rom);
     var cpu: m68k.Cpu = .{};
@@ -158,8 +160,6 @@ test "a frame runs a frame's worth of cycles, and the remainder carries" {
     const per_line = clock.cpuPerLine(c.board.cpu_hz);
     const want = per_line * chip.lines_per_frame;
 
-    // A frame may overrun by at most one instruction, never more, because the
-    // overrun is taken back off the next line.
     try testing.expect(ran >= want);
     try testing.expect(ran - want < per_line);
     try testing.expectEqual(@as(u64, 1), c.t.frame);
@@ -174,20 +174,13 @@ test "a frame runs a frame's worth of cycles, and the remainder carries" {
 
 /// The same spin, but with the interrupt mask down and a level 2 handler that
 /// counts the vblanks in the first word of RAM.
-///
-///     0x400: move.w #$2000, sr   ; supervisor, mask 0
-///     0x404: bra.b  -2
-///     0x500: addq.w #1, ($ff0000).l
-///            rte
 fn vblankRom() [0x508]u8 {
     const rom = spinRom();
     var wide: [0x508]u8 = @splat(0);
     @memcpy(wide[0..rom.len], &rom);
 
-    // Unlike the spin, this one takes exceptions, so its stack has to be in
-    // RAM rather than at the very bottom of it.
     const handler = 0x500;
-    std.mem.writeInt(u32, wide[0..4], cps1.ram_lo + 0x1000, .big);
+    std.mem.writeInt(u32, wide[0..4], cps2.ram_lo + 0x1000, .big);
     std.mem.writeInt(u32, wide[m68k.Exception.autovector(vint_level).vectorAddr()..][0..4], handler, .big);
     for ([_]u16{ 0x46fc, 0x2000, 0x60fe }, 0..) |word, i| {
         std.mem.writeInt(u16, wide[0x400 + i * 2 ..][0..2], word, .big);
@@ -213,4 +206,24 @@ test "vblank comes once a frame, at level 2" {
     cpu.sr.ipl = vint_level;
     for (0..frames) |_| runFrame(&c, &cpu);
     try testing.expectEqual(@as(u16, frames), std.mem.readInt(u16, c.ram[0..2], .big));
+}
+
+test "the opcode window is what the 68000 runs, and the ROM is what it reads" {
+    var rom = spinRom();
+    var opcodes = spinRom();
+    var c = spinning(&rom);
+    c.rom.decrypted = &opcodes;
+    var cpu: m68k.Cpu = .{};
+    reset(&c, &cpu);
+
+    // A second view where the spin is a NOP into an infinite loop one word
+    // along: same ROM, different program, which is what a key makes. Planted
+    // after the reset, because the reset is what fills that view.
+    std.mem.writeInt(u16, opcodes[0x400..0x402], 0x4e71, .big);
+    std.mem.writeInt(u16, opcodes[0x402..0x404], 0x60fe, .big);
+
+    runFrame(&c, &cpu);
+    // It ran the NOP and settled in the loop after it, which is only in the
+    // decrypted view; the plain ROM would have kept it at 0x400.
+    try testing.expectEqual(@as(u32, 0x402), cpu.pc);
 }

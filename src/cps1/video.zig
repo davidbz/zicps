@@ -35,6 +35,7 @@ const gfxPixel = chip.gfxPixel;
 const nameOffset = chip.nameOffset;
 const toRgba = chip.toRgba;
 const writeA = chip.writeA;
+const readB = chip.readB;
 const writeB = chip.writeB;
 
 /// The object list: 256 sprites of four words — X, Y, code, attribute. The chip
@@ -85,34 +86,6 @@ pub fn renderLine(v: *Video, b: *const board.Board, gfx: []const u8, line: u32, 
     }
 
     chip.emit(v, &l, line);
-}
-
-/// The CPS-B file answers three ways beyond the register it last saw written:
-/// the board's ID register, the two halves of the multiplier's product, and the
-/// extra controls a C-board maps into the window.
-pub fn readB(v: *const Video, b: *const board.Board, offset: u8) u16 {
-    if (offset >= board.cps_b_bytes) return chip.open_bus;
-    if (chip.same(b.id_offset, offset)) return b.id_value;
-
-    // The bus serves the six-button register itself; player 3 and player 4 are
-    // wired to nothing, and an input nobody is pressing reads high — which the
-    // last value written to the register is not, and a game polling them would
-    // believe it.
-    if (chip.same(b.in2_offset, offset) or chip.same(b.in3_offset, offset)) return chip.open_bus;
-
-    const product = multiply(v, b);
-    if (chip.same(b.mult_result_lo, offset)) return @truncate(product);
-    if (chip.same(b.mult_result_hi, offset)) return @truncate(product >> 16);
-
-    return chip.readB(v, b, offset);
-}
-
-/// 16x16 into 32, read back in halves. A board whose PAL does not decode the
-/// factors has no multiplier, and its product is never asked for.
-fn multiply(v: *const Video, b: *const board.Board) u32 {
-    const f1 = b.mult_factor1 orelse return 0;
-    const f2 = b.mult_factor2 orelse return 0;
-    return @as(u32, v.b[f1 / 2]) * @as(u32, v.b[f2 / 2]);
 }
 
 /// Takes the chip's copy of the object list. The board does this at vblank, and

@@ -104,6 +104,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "board", .module = board },
+            .{ .name = "m68k", .module = z68k.module("m68k") },
             .{ .name = "video", .module = video },
             .{ .name = "audio", .module = audio },
             .{ .name = "soundboard", .module = soundboard },
@@ -173,6 +174,64 @@ pub fn build(b: *std.Build) void {
             .{ .name = "cps1_video", .module = cps1_video },
             .{ .name = "clock", .module = clock },
             .{ .name = "soundboard", .module = soundboard },
+        },
+    });
+
+    // CPS-2: the same video chip and sound board behind an encrypted program
+    // ROM. `crypt` is wired without a machine because it is arithmetic on two
+    // slices and nothing else.
+    const cps2_crypt = b.addModule("cps2_crypt", .{
+        .root_source_file = b.path("src/cps2/crypt.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const cps2 = b.addModule("cps2", .{
+        .root_source_file = b.path("src/cps2/machine.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "romset", .module = romset },
+            .{ .name = "video", .module = video },
+            .{ .name = "audio", .module = audio },
+            .{ .name = "soundboard", .module = soundboard },
+            .{ .name = "controls", .module = controls },
+            .{ .name = "eeprom", .module = eeprom },
+            .{ .name = "clock", .module = clock },
+        },
+    });
+
+    const cps2_scheduler = b.addModule("cps2_scheduler", .{
+        .root_source_file = b.path("src/cps2/scheduler.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "m68k", .module = z68k.module("m68k") },
+            .{ .name = "board", .module = board },
+            .{ .name = "cps2", .module = cps2 },
+            .{ .name = "cps2_crypt", .module = cps2_crypt },
+            .{ .name = "video", .module = video },
+            .{ .name = "clock", .module = clock },
+            .{ .name = "soundboard", .module = soundboard },
+        },
+    });
+
+    // Which generation a loaded set is, as one tagged union. It knows both
+    // trees, so by §3.1 it is not a common module: it sits at the frontend
+    // level, beside `main.zig`, and everything below it stays generation-blind.
+    const machine = b.addModule("machine", .{
+        .root_source_file = b.path("src/machine.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "romset", .module = romset },
+            .{ .name = "state", .module = state },
+            .{ .name = "cps1", .module = cps1 },
+            .{ .name = "cps2", .module = cps2 },
+            .{ .name = "scheduler", .module = scheduler },
+            .{ .name = "cps2_scheduler", .module = cps2_scheduler },
         },
     });
 
@@ -325,9 +384,10 @@ pub fn build(b: *std.Build) void {
     }
 
     const modules = [_]*std.Build.Module{
-        board,  romset, video,  cps1,         cps1_video, scheduler, input,
-        config, audio,  kabuki, qsound,       soundboard, snow,      boards,
-        ym2151, oki,    state,  system_tests, clock,      controls,  eeprom,
+        board,  romset,  video,      cps1,           cps1_video, scheduler, input,
+        config, audio,   kabuki,     qsound,         soundboard, snow,      boards,
+        ym2151, oki,     state,      system_tests,   clock,      controls,  eeprom,
+        cps2,   machine, cps2_crypt, cps2_scheduler,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });
@@ -348,6 +408,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "board", .module = board },
             .{ .name = "boards", .module = boards },
             .{ .name = "cps1", .module = cps1 },
+            .{ .name = "cps2", .module = cps2 },
+            .{ .name = "machine", .module = machine },
             .{ .name = "controls", .module = controls },
             .{ .name = "scheduler", .module = scheduler },
         },
@@ -438,6 +500,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "board", .module = board },
             .{ .name = "romset", .module = romset },
             .{ .name = "cps1", .module = cps1 },
+            .{ .name = "cps2", .module = cps2 },
+            .{ .name = "machine", .module = machine },
             .{ .name = "scheduler", .module = scheduler },
             .{ .name = "clock", .module = clock },
             .{ .name = "controls", .module = controls },

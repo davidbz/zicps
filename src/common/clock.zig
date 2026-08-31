@@ -17,6 +17,7 @@
 
 const std = @import("std");
 const board = @import("board");
+const m68k = @import("m68k");
 const video = @import("video");
 const audio = @import("audio");
 const oki = @import("oki");
@@ -134,6 +135,36 @@ pub const Timing = struct {
     /// Wider than a sample, because the chip sums four voices without a limiter.
     oki_out: i32 = 0,
 };
+
+/// The 68000's share of a line: the cycles its own crystal owes it, less
+/// whatever the last line overran by, with this line's overrun carried forward
+/// the same way the sound Z80's is. Generic over the machine, because the bus
+/// is the only thing the two generations disagree about here and `m68k.Core` is
+/// generic over that already — what order the rest of the line goes in is each
+/// machine's own, and stays with it.
+pub fn runCpu(comptime M: type, c: *M, cpu: *m68k.Cpu, hz: u32) void {
+    const Core = m68k.Core(M);
+    const owed = cpuPerLine(hz);
+    // A line whose predecessor overran by more than a whole line's budget owes
+    // the difference forward rather than running backwards.
+    const budget = owed -| c.t.cpu_over;
+    const start = cpu.cycles;
+
+    // The interrupt is a level held on a pin, and the board drops it when the
+    // 68000 acknowledges. z68k has no acknowledge hook, so a line with one
+    // still on the pin is stepped rather than run, and the pin is dropped the
+    // instant the vector is entered — otherwise a handler that returns inside
+    // the same line takes the same vblank over and over.
+    while (cpu.pending_ipl != 0 and cpu.cycles -% start < budget) {
+        const takeable = cpu.pending_ipl > cpu.sr.ipl;
+        Core.step(cpu, c);
+        if (takeable) Core.setIpl(cpu, 0);
+    }
+    const stepped = cpu.cycles -% start;
+    if (stepped < budget) _ = Core.run(cpu, c, budget - stepped);
+
+    c.t.cpu_over = c.t.cpu_over + (cpu.cycles -% start) - owed;
+}
 
 /// The sound board's share of the same line: the Z80's cycles, the interrupts
 /// its divider raised while they ran, and the samples the chip finished.

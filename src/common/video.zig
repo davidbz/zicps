@@ -142,15 +142,39 @@ pub fn writeA(v: *Video, b: *const board.Board, offset: u8, value: u16, mask: u1
     if (offset / 2 == palette_base / 2) copyPalette(v, b);
 }
 
-/// Every register in the file reads back what was last written to it, except a
-/// raster register: that one reads back where the beam is, not the reload value
-/// it was given. What else a board answers is the board's own protection.
+/// Every register in the file reads back what was last written to it, except
+/// the four the board's PAL answers instead: a raster register reads back where
+/// the beam is rather than the reload value it was given, the ID register reads
+/// the number that board was given, and the multiplier's product comes back in
+/// halves. Which offsets those are is the board file's, and a board whose PAL
+/// decodes none of them — a CPS-2 board decodes only the multiplier — asks for
+/// none of this.
 pub fn readB(v: *const Video, b: *const board.Board, offset: u8) u16 {
     if (offset >= board.cps_b_bytes) return open_bus;
+    if (same(b.id_offset, offset)) return b.id_value;
+
+    // The bus serves the six-button register itself; player 3 and player 4 are
+    // wired to nothing, and an input nobody is pressing reads high — which the
+    // last value written to the register is not, and a game polling them would
+    // believe it.
+    if (same(b.in2_offset, offset) or same(b.in3_offset, offset)) return open_bus;
+
+    const product = multiply(v, b);
+    if (same(b.mult_result_lo, offset)) return @truncate(product);
+    if (same(b.mult_result_hi, offset)) return @truncate(product >> 16);
+
     for (b.raster_line, 0..) |reg, i| {
         if (same(reg, offset)) return v.raster_counter[i];
     }
     return v.b[offset / 2];
+}
+
+/// 16x16 into 32, read back in halves. A board whose PAL does not decode the
+/// factors has no multiplier, and its product is never asked for.
+fn multiply(v: *const Video, b: *const board.Board) u32 {
+    const f1 = b.mult_factor1 orelse return 0;
+    const f2 = b.mult_factor2 orelse return 0;
+    return @as(u32, v.b[f1 / 2]) * @as(u32, v.b[f2 / 2]);
 }
 
 pub fn writeB(v: *Video, b: *const board.Board, offset: u8, value: u16, mask: u16) void {

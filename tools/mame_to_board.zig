@@ -632,6 +632,7 @@ const Mame = struct {
                 .audio => romset.max_audio,
                 .qsound => romset.max_qsound,
                 .oki => romset.max_oki,
+                .key => romset.max_key,
             };
             if (size > max)
                 return m.give("0x{x} bytes of {s} ROM, and no board holds more than 0x{x}", .{ size, @tagName(region), max });

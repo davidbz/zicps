@@ -197,4 +197,8 @@ pub const files = [_]struct { name: []const u8, text: []const u8 }{
     .{ .name = "sfach", .text = @embedFile("sfach.board") },
     .{ .name = "sfzch", .text = @embedFile("sfzch.board") },
     .{ .name = "sfzbch", .text = @embedFile("sfzbch.board") },
+
+    // CPS-2, written by hand rather than by the tool: the board library for
+    // that generation is M13.
+    .{ .name = "ddtod", .text = @embedFile("ddtod.board") },
 };

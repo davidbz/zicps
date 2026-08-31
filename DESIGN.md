@@ -1491,6 +1491,36 @@ Acceptance: one CPS-2 set reaches its boot self-test and passes it, with sound.
 `compat` grows a second directory and reports it separately, because a CPS-2 set
 with no video yet is "blank" for a reason that is not a fault.
 
+Ceilings left behind:
+
+- **The acceptance is unmet, and cannot be met here.** A CPS-2 key is part of a
+  set, not part of MAME: modern `cps2crypt.cpp` reads it from the set's own
+  `key` region and carries no table of its own. None of the six sets in
+  `roms/cps2` has one — they are all pre-key-era dumps — so no board on this
+  machine decrypts, and none reaches its self-test. `ddtod` loads, says
+  `SUICIDED BOARD` on the card, runs its own ciphertext and halts on the first
+  frame, which is what the hardware does with a flat battery. Everything under
+  the key is exercised: the map and its tests, the frame loop, the QSound arm,
+  and the decryptor against MAME's own output. Put a set with a key in
+  `roms/cps2` and the acceptance answers itself.
+- For the same reason the crypt pin is not "a known set's first sixteen
+  decrypted opcodes" but sixteen NOPs at sixteen addresses under a made-up key,
+  with the expected words taken from `cps2crypt.cpp` compiled and run on the
+  same input. It pins the same arithmetic; it does not pin that a real board's
+  program comes out as 68000 code. Re-pin it against a real set when one is at
+  hand.
+- The `Machine` union is `src/machine.zig`, beside `main.zig` rather than inside
+  it as the deliverable says. `test/compat.zig` needs the same union, and §3.1
+  will not have it under `common/` because it knows both trees. Beside the
+  frontend is the only shelf left.
+- CPS-2 graphics load and decode into nothing. MAME unshuffles each 0x200000
+  bank of the region before the ordinary tile decode runs, and neither that nor
+  the object hardware that would draw the result is here; the region is carried
+  so that M12 has something to point at.
+- The program region is decrypted on every reset rather than once at load —
+  2.5 MiB for `ddtod`, a few milliseconds. It is once a machine in practice.
+  Move it into the set if reset ever has to be cheap.
+
 ### M12: CPS-2 video
 
 Deliverables: `Line.over` widens to `prio: [width]u8`; object RAM banking and
