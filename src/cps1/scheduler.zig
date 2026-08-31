@@ -39,9 +39,12 @@ pub fn runFrame(c: *cps1.Machine, cpu: *m68k.Cpu) void {
 }
 
 fn runLine(c: *cps1.Machine, cpu: *m68k.Cpu) void {
+    // Half this library is a 10 MHz board and half a 12 MHz one, and which is
+    // which is a line in the board file.
+    const owed = clock.cpuPerLine(c.board.cpu_hz);
     // A line whose predecessor overran by more than a whole line's budget owes
     // the difference forward rather than running backwards.
-    const budget = clock.cpu_per_line -| c.t.cpu_over;
+    const budget = owed -| c.t.cpu_over;
     const start = cpu.cycles;
 
     // The interrupt is a level held on a pin, and the board drops it when the
@@ -58,7 +61,7 @@ fn runLine(c: *cps1.Machine, cpu: *m68k.Cpu) void {
     if (stepped < budget) _ = Core.run(cpu, c, budget - stepped);
 
     const ran = cpu.cycles -% start;
-    c.t.cpu_over = c.t.cpu_over + ran - clock.cpu_per_line;
+    c.t.cpu_over = c.t.cpu_over + ran - owed;
 
     clock.runSound(&c.t, &c.sound, &c.mixer);
 
@@ -173,12 +176,13 @@ test "a frame runs a frame's worth of cycles, and the remainder carries" {
     const start = cpu.cycles;
     runFrame(&c, &cpu);
     const ran = cpu.cycles - start;
-    const want = clock.cpu_per_line * chip.lines_per_frame;
+    const per_line = clock.cpuPerLine(c.board.cpu_hz);
+    const want = per_line * chip.lines_per_frame;
 
     // A frame may overrun by at most one instruction, never more, because the
     // overrun is taken back off the next line.
     try testing.expect(ran >= want);
-    try testing.expect(ran - want < clock.cpu_per_line);
+    try testing.expect(ran - want < per_line);
     try testing.expectEqual(@as(u64, 1), c.t.frame);
     try testing.expectEqual(clock.ref_per_frame, c.t.ref);
 
@@ -186,7 +190,7 @@ test "a frame runs a frame's worth of cycles, and the remainder carries" {
     for (0..10) |_| runFrame(&c, &cpu);
     const total = cpu.cycles - start;
     try testing.expect(total >= want * 11);
-    try testing.expect(total - want * 11 < clock.cpu_per_line);
+    try testing.expect(total - want * 11 < per_line);
 }
 
 /// The same spin, but with the interrupt mask down and a level 2 handler that

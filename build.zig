@@ -103,6 +103,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .imports = &.{
+            .{ .name = "board", .module = board },
             .{ .name = "video", .module = video },
             .{ .name = "audio", .module = audio },
             .{ .name = "soundboard", .module = soundboard },

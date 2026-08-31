@@ -46,6 +46,15 @@ fn nameList(comptime E: type) []const u8 {
     }
 }
 
+/// The 68000 crystals this family shipped on, which is a number soldered to a
+/// board and so a line in its file. MAME's base CPS-1 config is the 10 MHz one
+/// and `cps1_12MHz` the override, so roughly half the library is the slow one.
+pub const cps1_slow_cpu_hz = 10_000_000;
+pub const cps1_cpu_hz = 12_000_000;
+pub const cps2_cpu_hz = 16_000_000;
+/// All three, for `clock.zig` to check its reference against.
+pub const cpu_rates = [_]u32{ cps1_slow_cpu_hz, cps1_cpu_hz, cps2_cpu_hz };
+
 /// Which chips a tile code range lives on, and the same four bank sizes the
 /// B-board's PAL switches between.
 pub const gfx_banks = 4;
@@ -133,6 +142,10 @@ pub const GfxRange = struct {
 };
 
 pub const Board = struct {
+    /// The 68000's crystal. Not battery-backed data — it is soldered on — but
+    /// it is per-board and there is nowhere else a set says which board it is.
+    cpu_hz: u32 = cps1_cpu_hz,
+
     // CPS-B-21 register offsets. These are the ones the battery holds.
     layer_control: Reg = null,
     priority: [priority_groups]Reg = @splat(null),
@@ -221,6 +234,7 @@ pub const Error = error{BadBoardFile};
 /// are keys too, and are matched after these.
 const Key = enum {
     version,
+    cpu_clock,
     layer_control,
     priority,
     palette_control,
@@ -308,6 +322,11 @@ fn applyKey(p: *Parser, k: Key, vals: *Tokens) Error!void {
             const v = try int(u32, p, vals);
             if (v != version) return p.bad("board file version {d}, this build reads {d}", .{ v, version });
             p.seen_version = true;
+        },
+        .cpu_clock => {
+            b.cpu_hz = try int(u32, p, vals);
+            if (std.mem.indexOfScalar(u32, &cpu_rates, b.cpu_hz) == null)
+                return p.bad("`cpu_clock` is {d} Hz, and no board in this family runs its 68000 at that", .{b.cpu_hz});
         },
         .layer_control => b.layer_control = try reg(p, vals),
         .priority => {
