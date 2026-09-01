@@ -58,6 +58,22 @@ pub const reg_ct_wave = 0x1b;
 pub const reg_channel = 0x20;
 pub const reg_operator = 0x40;
 
+/// A channel register's address picks the channel in its low three bits and one
+/// of four registers above them.
+const ch_reg_mask = 0x18;
+const ch_conn = 0x00;
+const ch_kc = 0x08;
+const ch_kf = 0x10;
+
+/// An operator register's address picks the operator in its low five bits and
+/// one of six registers above them.
+const op_reg_mask = 0xe0;
+const op_dt1_mul = 0x40;
+const op_tl = 0x60;
+const op_ks_ar = 0x80;
+const op_ame_d1r = 0xa0;
+const op_dt2_d2r = 0xc0;
+
 /// `reg_control`, bit by bit.
 pub const load_a = 0x01;
 pub const load_b = 0x02;
@@ -158,6 +174,10 @@ const sine_negate = sine_mirror << 1;
 /// How far the first operator's last two outputs come down before the
 /// channel's feedback depth is taken off that.
 const feedback_shift = 10;
+
+/// The detune is taken off at seventeen bits, before the multiple widens the
+/// increment to the twenty a phase carries.
+const detune_mask = 0x1ffff;
 
 /// An envelope level is ten bits, 0 loud and 1023 silent, in steps of 3/32 dB.
 pub const level_max = 1023;
@@ -402,15 +422,15 @@ fn writeControl(y: *Ym2151, value: u8) void {
 
 fn writeChannel(y: *Ym2151, addr: u8, value: u8) void {
     const c = &y.ch[addr & 7];
-    switch (addr & 0x18) {
-        0x00 => {
+    switch (addr & ch_reg_mask) {
+        ch_conn => {
             c.right = value & 0x80 != 0;
             c.left = value & 0x40 != 0;
             c.fb = @truncate(value >> 3);
             c.alg = @truncate(value);
         },
-        0x08 => c.kc = @truncate(value),
-        0x10 => c.kf = @truncate(value >> 2),
+        ch_kc => c.kc = @truncate(value),
+        ch_kf => c.kf = @truncate(value >> 2),
         else => {
             c.pms = @truncate(value >> 4);
             c.ams = @truncate(value);
@@ -420,21 +440,21 @@ fn writeChannel(y: *Ym2151, addr: u8, value: u8) void {
 
 fn writeOperator(y: *Ym2151, addr: u8, value: u8) void {
     const op = &y.op[addr & 0x1f];
-    switch (addr & 0xe0) {
-        0x40 => {
+    switch (addr & op_reg_mask) {
+        op_dt1_mul => {
             op.dt1 = @truncate(value >> 4);
             op.mul = @truncate(value);
         },
-        0x60 => op.tl = @truncate(value),
-        0x80 => {
+        op_tl => op.tl = @truncate(value),
+        op_ks_ar => {
             op.ks = @truncate(value >> 6);
             op.ar = @truncate(value);
         },
-        0xa0 => {
+        op_ame_d1r => {
             op.ame = value & 0x80 != 0;
             op.d1r = @truncate(value);
         },
-        0xc0 => {
+        op_dt2_d2r => {
             op.dt2 = @truncate(value >> 6);
             op.d2r = @truncate(value);
         },
@@ -551,10 +571,10 @@ fn incrementOf(y: *const Ym2151, ch: usize, op: *const Operator) u32 {
         const sum = code / 4 + 9 + @intFromBool(fine >= 2);
         const detune = @as(u32, dt1_table[(sum & 1) * 4 + (code & 3)]) >> @intCast(9 - sum / 2);
         inc = if (op.dt1 & 4 != 0) inc -% detune else inc +% detune;
-        inc &= 0x1ffff;
+        inc &= detune_mask;
     }
     inc = if (op.mul != 0) inc * op.mul else inc >> 1;
-    return inc & 0xfffff;
+    return inc & phase_mask;
 }
 
 // ------------------------------------------------------------- the envelope

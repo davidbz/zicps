@@ -77,21 +77,7 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
     var src = try open(gpa, io, parent, path, diag);
     defer src.close();
 
-    var sizes = std.EnumArray(board.Region, u64).initFill(0);
-    for (b.romList()) |rom| {
-        const at = sizes.getPtr(rom.region);
-        at.* = @max(at.*, rom.mode.extent(rom.dest, rom.len));
-    }
-
-    // A CPS-2 set's graphics are shuffled a bank at a time whether or not the
-    // chips fill the last bank, so the region is rounded up to a whole one:
-    // otherwise the unshuffle below runs off the end of what this set happens
-    // to name, and the tiles in the last bank land in the wrong place.
-    if (b.system == .cps2) {
-        const gfx = sizes.getPtr(.gfx);
-        gfx.* = std.mem.alignForward(u64, gfx.*, shuffle_bank);
-    }
-    try cap(&sizes.values, diag);
+    const sizes = try regionSizes(b, diag);
 
     // Graphics arrive interleaved and are expanded afterwards; the other three
     // regions are their final selves.
@@ -118,14 +104,8 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
         .key = key,
     }), diag);
 
-    if (b.system == .cps2) {
-        var at: usize = 0;
-        while (at < packed_gfx.len) : (at += shuffle_bank) unshuffle(packed_gfx[at..][0..shuffle_bank]);
-    }
-
-    const gfx = try alloc(gpa, packed_gfx.len * pixels_per_byte);
+    const gfx = try expandGfx(gpa, packed_gfx, b.system);
     errdefer gpa.free(gfx);
-    decode(packed_gfx, gfx);
 
     // `decrypted` is the program itself where the 68000 fetches opcodes out of
     // the ROM, which is every CPS-1 board. A CPS-2 board reads its opcodes from
@@ -134,6 +114,41 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
     const decrypted = if (b.system == .cps2) try gpa.dupe(u8, program) else program;
 
     return .{ .program = program, .gfx = gfx, .audio = audio, .qsound = qsound, .oki = oki, .key = key, .decrypted = decrypted };
+}
+
+/// How much each region has to hold: the far end of the furthest chip that
+/// lands in it.
+fn regionSizes(b: *const board.Board, diag: *Diag) Error!std.EnumArray(board.Region, u64) {
+    var sizes = std.EnumArray(board.Region, u64).initFill(0);
+    for (b.romList()) |rom| {
+        const at = sizes.getPtr(rom.region);
+        at.* = @max(at.*, rom.mode.extent(rom.dest, rom.len));
+    }
+
+    // A CPS-2 set's graphics are shuffled a bank at a time whether or not the
+    // chips fill the last bank, so the region is rounded up to a whole one:
+    // otherwise the unshuffle runs off the end of what this set happens to
+    // name, and the tiles in the last bank land in the wrong place.
+    if (b.system == .cps2) {
+        const gfx = sizes.getPtr(.gfx);
+        gfx.* = std.mem.alignForward(u64, gfx.*, shuffle_bank);
+    }
+    try cap(&sizes.values, diag);
+    return sizes;
+}
+
+/// Turns the chips as they arrive into the pixels the video code reads: a
+/// CPS-2 set's banks are put back in order first, then every set is unpacked
+/// from four planes to a byte a pixel.
+fn expandGfx(gpa: std.mem.Allocator, packed_gfx: []u8, system: board.System) Error![]u8 {
+    if (system == .cps2) {
+        var at: usize = 0;
+        while (at < packed_gfx.len) : (at += shuffle_bank) unshuffle(packed_gfx[at..][0..shuffle_bank]);
+    }
+
+    const gfx = try alloc(gpa, packed_gfx.len * pixels_per_byte);
+    decode(packed_gfx, gfx);
+    return gfx;
 }
 
 /// Reads every chip the board file names into the region it belongs to. A file
@@ -261,9 +276,11 @@ pub fn decode(src: []const u8, dst: []u8) void {
 /// Undoing it is the halving MAME does — unshuffle each half of the bank, then
 /// swap the two middle quarters — which comes out as a plain de-interleave.
 pub const shuffle_bank = 0x200000;
+/// Undoing it bottoms out at a pair of rows, which is already in order.
+const shuffle_floor = 2 * bytes_per_row;
 
 fn unshuffle(bank: []u8) void {
-    if (bank.len == 2 * bytes_per_row) return;
+    if (bank.len == shuffle_floor) return;
     const half = bank.len / 2;
     unshuffle(bank[0..half]);
     unshuffle(bank[half..]);
@@ -316,9 +333,7 @@ const Source = struct {
             // hashes to, and a board file that names a CRC knows which chip it
             // wants, so the second is found by what it is rather than what it
             // is called. MAME does the same with the same numbers.
-            if (rom.crc) |want| {
-                if (same_chip == null and entry.crc32 == want) same_chip = entry;
-            }
+            if (same_chip == null and rom.crc == entry.crc32) same_chip = entry;
             if (!std.ascii.eqlIgnoreCase(std.fs.path.basename(in_zip), rom.name)) continue;
             return s.extract(&fr, entry, rom.name);
         }

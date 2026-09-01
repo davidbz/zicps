@@ -134,31 +134,43 @@ fn drawSprite(v: *Video, b: *const board.Board, gfx: []const u8, l: *Line, line:
     const flip_y = attr & flip_y_bit != 0;
     const color = @as(u32, attr & color_mask) * palette_colors;
 
-    for (0..ny) |down| {
+    var down: u32 = 0;
+    while (down < ny) : (down += 1) {
         const sy = (@as(u32, y) + down * sprite_size) & sprite_pos_mask;
         if (line < sy or line >= sy + sprite_size) continue;
         const ty = if (flip_y) sprite_size - 1 - (line - sy) else line - sy;
-        const block_row = if (flip_y) ny - 1 - down else down;
+        const row = if (flip_y) ny - 1 - down else down;
 
-        for (0..nx) |across| {
+        var across: u32 = 0;
+        while (across < nx) : (across += 1) {
             const sx = (@as(u32, x) + across * sprite_size) & sprite_pos_mask;
-            const block_col = if (flip_x) nx - 1 - across else across;
-            const tile = (first & ~@as(u32, block_wrap)) +
-                ((first +% block_col) & block_wrap) +
-                block_row_step * block_row;
-            const src: u32 = @intCast(tile * sprite_pixels + ty * sprite_size);
-
-            for (0..sprite_size) |px| {
-                const dot = sx + px;
-                if (dot < first_visible_dot or dot >= first_visible_dot + width) continue;
-                const dx = dot - first_visible_dot;
-                if (l.prio[dx] != 0) continue;
-                const at: u32 = @intCast(if (flip_x) sprite_size - 1 - px else px);
-                const pen = gfxPixel(gfx, src + at);
-                if (pen == transparent_pen) continue;
-                l.color[dx] = v.colors[color + pen];
-            }
+            const col = if (flip_x) nx - 1 - across else across;
+            drawRow(v, gfx, l, blockCode(first, col, row), sx, ty, color, flip_x);
         }
+    }
+}
+
+/// Which code a tile of a block draws: the columns wrap inside a nibble, so a
+/// block that runs off the end of one comes back round to its start.
+fn blockCode(first: u32, col: u32, row: u32) u32 {
+    return (first & ~@as(u32, block_wrap)) +
+        ((first +% col) & block_wrap) +
+        block_row_step * row;
+}
+
+/// One line of one tile, and the sprites go under everything: a pixel is only
+/// drawn where no tilemap has claimed the plane.
+fn drawRow(v: *Video, gfx: []const u8, l: *Line, tile: u32, sx: u32, ty: u32, color: u32, flip_x: bool) void {
+    const src = tile * sprite_pixels + ty * sprite_size;
+    for (0..sprite_size) |px| {
+        const dot = sx + px;
+        if (dot < first_visible_dot or dot >= first_visible_dot + width) continue;
+        const dx = dot - first_visible_dot;
+        if (l.prio[dx] != 0) continue;
+        const at: u32 = @intCast(if (flip_x) sprite_size - 1 - px else px);
+        const pen = gfxPixel(gfx, src + at);
+        if (pen == transparent_pen) continue;
+        l.color[dx] = v.colors[color + pen];
     }
 }
 

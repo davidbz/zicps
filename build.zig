@@ -83,6 +83,15 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    // The 68000's data bus: the lanes, and what a device wired to one of them
+    // answers. The maps that put a device at an address are each board's own.
+    const bus = b.addModule("bus", .{
+        .root_source_file = b.path("src/common/bus.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "romset", .module = romset }},
+    });
+
     const controls = b.addModule("controls", .{
         .root_source_file = b.path("src/common/controls.zig"),
         .target = target,
@@ -153,6 +162,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "board", .module = board },
             .{ .name = "romset", .module = romset },
+            .{ .name = "bus", .module = bus },
             .{ .name = "video", .module = video },
             .{ .name = "audio", .module = audio },
             .{ .name = "soundboard", .module = soundboard },
@@ -192,6 +202,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "board", .module = board },
+            .{ .name = "bus", .module = bus },
             .{ .name = "romset", .module = romset },
             .{ .name = "video", .module = video },
             .{ .name = "audio", .module = audio },
@@ -230,8 +241,8 @@ pub fn build(b: *std.Build) void {
     });
 
     // Which generation a loaded set is, as one tagged union. It knows both
-    // trees, so by §3.1 it is not a common module: it sits at the frontend
-    // level, beside `main.zig`, and everything below it stays generation-blind.
+    // trees, so it is not a common module: it sits at the frontend level,
+    // beside `main.zig`, and everything below it stays generation-blind.
     const machine = b.addModule("machine", .{
         .root_source_file = b.path("src/machine.zig"),
         .target = target,
@@ -399,7 +410,7 @@ pub fn build(b: *std.Build) void {
         board,  romset,  video,      cps1,           cps1_video, scheduler, input,
         config, audio,   kabuki,     qsound,         soundboard, snow,      boards,
         ym2151, oki,     state,      system_tests,   clock,      controls,  eeprom,
-        cps2,   machine, cps2_crypt, cps2_scheduler, cps2_video,
+        cps2,   machine, cps2_crypt, cps2_scheduler, cps2_video, bus,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });

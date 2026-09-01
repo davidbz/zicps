@@ -286,7 +286,7 @@ test "the sound Z80 is owed exactly what it is given, line after line" {
 test "one line is the same slice of time for every part of the board" {
     try testing.expectEqual(@as(u64, 15360), ref_per_line);
     try testing.expectEqual(@as(u64, 512), sound_per_line);
-    // §3.3's table, from the other end: what a line is worth to each of the
+    // The divider table from the other end: what a line is worth to each of the
     // three 68000s this family shipped.
     try testing.expectEqual(@as(u64, 640), cpuPerLine(board.cps1_slow_cpu_hz));
     try testing.expectEqual(@as(u64, 768), cpuPerLine(board.cps1_cpu_hz));

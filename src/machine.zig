@@ -6,8 +6,8 @@
 //! holds one of these and asks it for the handful of things it needs.
 //!
 //! It sits beside `main.zig` and not under `common/`, because a module that
-//! knows both generations is by §3.1's rule not a common one: dependencies
-//! point inward, and this is the frontend end of them.
+//! knows both generations is not a common one: dependencies point inward, and
+//! this is the frontend end of them.
 
 const std = @import("std");
 const board = @import("board");
