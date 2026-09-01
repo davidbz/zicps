@@ -188,8 +188,8 @@ const Sprite = struct {
     ny: u32,
 };
 
-/// Sprites are drawn last of the list first, so the first entry a game writes
-/// ends up on top of the ones after it.
+/// Sprites are drawn last of the list first, and the first one to claim a dot
+/// keeps it (see `drawRow`), so the last entry a game writes ends up on top.
 fn drawSprites(c: *cps2.Machine, l: *Line, line: u32, masks: [8]u8) void {
     var i = lastSprite(c);
     while (i >= 0) : (i -= sprite_words) {
@@ -284,9 +284,11 @@ fn drawRow(c: *cps2.Machine, l: *Line, masks: [8]u8, s: Sprite, tile: u32, sx: u
         if (pen == transparent_pen) continue;
 
         // A sprite pixel a layer covers is still a sprite pixel: it claims the
-        // plane whether or not it is the one seen there.
+        // plane whether or not it is the one seen there, and a claimed dot is
+        // closed to the rest of the list.
         const under = l.prio[dx];
-        const hidden = under < masks.len and mask >> @intCast(under) & 1 != 0;
+        if (under == sprite_drawn) continue;
+        const hidden = mask >> @intCast(under) & 1 != 0;
         l.prio[dx] = sprite_drawn;
         if (!hidden) l.color[dx] = c.v.colors[s.color + pen];
     }
@@ -499,4 +501,35 @@ test "a line of the picture is the object list over the layers, ranked" {
     renderLine(&c, first_visible_line + sprite_size);
     try testing.expectEqual(@as(u32, sprite_pixels % transparent_pen), c.v.fb[0]);
     try testing.expectEqual(c.v.colors[chip.background_entry], c.v.fb[sprite_size * width]);
+}
+
+test "the last entry in the list is the one over the ones before it" {
+    var gfx: [0x2000]u8 = undefined;
+    stripedGfx(&gfx);
+    var c = plainMachine(&gfx);
+    c.output[obj_x_word] = home_x_offset;
+    c.output[obj_y_word] = home_y_offset;
+
+    // Two sprites of different codes on the same dots. The second one written
+    // is the one seen: a dot the list has already claimed is closed to the
+    // rest of it, and the list is walked back to front.
+    object(&c, 0, sprite_x, sprite_y, 1, 0);
+    object(&c, sprite_words, sprite_x, sprite_y, 2, 0);
+    object(&c, sprite_words * 2, 0, end_y, 0, 0);
+    latchObjects(&c);
+
+    var l = chip.beginLine(&c.v);
+    drawSprites(&c, &l, first_visible_line, @splat(0));
+    try testing.expectEqual(@as(u32, 2 * sprite_pixels % transparent_pen), l.color[0]);
+
+    // And that holds even when the later one is the one a layer covers: it
+    // claims the dot, and the earlier one no longer shows through.
+    var masks = [_]u8{0} ** 8;
+    masks[1] = 0x02;
+    var m = chip.beginLine(&c.v);
+    m.prio[0] = 1;
+    const tilemap = c.v.colors[chip.background_entry];
+    m.color[0] = tilemap;
+    drawSprites(&c, &m, first_visible_line, masks);
+    try testing.expectEqual(tilemap, m.color[0]);
 }
