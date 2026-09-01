@@ -202,6 +202,17 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    const cps2_video = b.addModule("cps2_video", .{
+        .root_source_file = b.path("src/cps2/video.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "video", .module = video },
+            .{ .name = "cps2", .module = cps2 },
+        },
+    });
+
     const cps2_scheduler = b.addModule("cps2_scheduler", .{
         .root_source_file = b.path("src/cps2/scheduler.zig"),
         .target = target,
@@ -211,6 +222,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "board", .module = board },
             .{ .name = "cps2", .module = cps2 },
             .{ .name = "cps2_crypt", .module = cps2_crypt },
+            .{ .name = "cps2_video", .module = cps2_video },
             .{ .name = "video", .module = video },
             .{ .name = "clock", .module = clock },
             .{ .name = "soundboard", .module = soundboard },
@@ -387,7 +399,7 @@ pub fn build(b: *std.Build) void {
         board,  romset,  video,      cps1,           cps1_video, scheduler, input,
         config, audio,   kabuki,     qsound,         soundboard, snow,      boards,
         ym2151, oki,     state,      system_tests,   clock,      controls,  eeprom,
-        cps2,   machine, cps2_crypt, cps2_scheduler,
+        cps2,   machine, cps2_crypt, cps2_scheduler, cps2_video,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });

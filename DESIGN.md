@@ -626,13 +626,30 @@ then:
 **The video**, confirmed at M12, and the one place CPS-2 genuinely differs:
 
 - Object RAM is two 8 KiB banks. `0x8040e0` bit 0 picks the one the CPU writes,
-  and `cps2_objram_latch` takes the chip's copy on the vblank edge — CPS-1's
-  double buffering done with two banks instead of a copy out of graphics RAM.
-- Sprite priority is a bitmap, not a pen mask. `pri_ctrl` feeds `primasks[8]`,
-  and each sprite is composited against a per-pixel priority plane the tilemaps
-  wrote. CPS-1's `Line.over: [width]bool` is the degenerate one-bit case of it;
-  M12 widens that field to `prio: [width]u8` when there is a second
-  implementation to design the shape against, and not before.
+  and the chip's copy is taken on the vblank edge — CPS-1's double buffering
+  done with two banks instead of a copy out of graphics RAM. The bank the chip
+  reads is the one at `0x700000`, which is the one the CPU has: a game fills the
+  far window at `0x708000` and then flips, and no game writes the near one.
+- The object list is drawn over every tilemap rather than in a layer slot of its
+  own. The slot the CPS-B layer control still gives it says only where the
+  sprites rank; that slot comes out of the order and the maps close up behind
+  it, leaving three passes. Each pass ORs its own bit into a per-pixel priority
+  plane, `pri_ctrl` ranks the three, and `primasks[8]` turns that ranking into,
+  per sprite priority, the set of plane values that sprite is hidden under. A
+  sprite pixel that is drawn claims the plane, so sprites never cut each other.
+  CPS-1's `Line.over: [width]bool` is the degenerate one-bit case, and M12
+  widened the field to `prio: [width]u8`.
+- The board's priority-group registers do nothing here. On CPS-1 a tile's group
+  names the pens drawn back over the sprites, in a second pass; CPS-2 has no
+  such pass, so each of its three passes draws every pen it has and the ranking
+  settles the rest.
+- A sprite of priority 0 is under everything, including bare background, and so
+  is drawn nowhere. `primasks[0]` is `0xff`.
+- Sprite coordinates are ten bits, the code takes two more from the Y word, and
+  the object output latch carries an X and Y offset the whole plane is panned
+  by. The list ends at the first entry with `y >= 0x8000` or `attr >= 0xff00`.
+- Graphics ROM arrives riffled: MAME's `unshuffle` undoes it a 2 MiB bank at a
+  time, before the `gfx_cps1` decode that is otherwise shared with CPS-1.
 
 ## 8. The Board File, ROM Sets, Persistence
 
@@ -1526,13 +1543,49 @@ Ceilings left behind:
 
 ### M12: CPS-2 video
 
-Deliverables: `Line.over` widens to `prio: [width]u8`; object RAM banking and
-the vblank latch; the CPS-2 sprite entry decode; `primasks[8]` compositing
-(§7.6). CPS-1's `renderLine` is re-expressed against the wider field and must
-produce the same hashes it produced at M10 — that is how the widening is shown
-to be a generalisation and not a rewrite.
+Deliverables:
 
-Acceptance: a CPS-2 set draws its attract mode; the M10 hashes still stand.
+- `common/video.zig`: `Line.over` widens to `prio: [width]u8`, and what a
+  tilemap pass leaves in that plane becomes a parameter — `.pens` for CPS-1's
+  high-pen mark, `.pass` for CPS-2's bit per pass, `.none` for a layer nothing
+  is settled against. CPS-1's `renderLine` is re-expressed against it in two
+  lines: the mask flag becomes `.pens`, and `if (l.over[dx])` becomes
+  `if (l.prio[dx] != 0)`. Its hashes do not move, which is what shows the
+  widening is a generalisation and not a rewrite.
+- `src/cps2/video.zig`: the vblank latch of the object list and its ranking, the
+  sprite entry decode of §7.6, `layerOrder` — the sprite slot taken out of the
+  layer order and the `primasks[8]` derivation — and the per-pixel compositing.
+- `src/cps2/machine.zig` gains the latched `obj` copy and `pri_ctrl`;
+  `src/cps2/scheduler.zig` draws a line per line and latches on the vblank edge,
+  in the order CPS-1's does.
+- `romset.zig` unshuffles each 0x200000 bank of a CPS-2 graphics region before
+  the ordinary tile decode, rounding the region up to a whole bank first so that
+  the last one is unshuffled whole whether or not chips fill it.
+
+Acceptance: the M10 hashes stand — `zig build test` and `zig build testrom` pass
+unchanged, and the `roms/cps1` sweep is what it was. The other half is unmet;
+see below.
+
+Ceilings left behind:
+
+- **"A CPS-2 set draws its attract mode" cannot be shown here**, for M11's
+  reason and no new one: no set in `roms/cps2` carries a key, so `ddtod` is a
+  suicided board, runs its own ciphertext and halts on the first frame with
+  nothing on screen. What the sweep prints is what M11 left. The video path is
+  driven directly by unit tests instead — the bank latch, both end markers, the
+  mask table against MAME's own numbers, the offsets, the flips, the block-code
+  wrap, and a line taken through `renderLine` into the framebuffer. Put a keyed
+  set in `roms/cps2` and the acceptance answers itself.
+- The two pins that stand in for a real set are taken the same way M11's crypt
+  pin was: MAME's `unshuffle` and `render_layers` compiled and run over inputs
+  this repo chose. They pin the arithmetic, not that a real board's graphics
+  come out as tiles.
+- A sprite code past the end of the graphics region draws as transparent, where
+  MAME wraps it modulo the number of tiles the region holds. Ours is the honest
+  reading of an empty socket and it costs nothing to keep; revisit it if a set
+  turns out to rely on the wrap.
+- `compat`'s CPS-2 exemption is now only for a suicided board. A CPS-2 set that
+  boots is judged blank, halted or still exactly as a CPS-1 one is.
 
 ### M13: The CPS-2 board library
 
