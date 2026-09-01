@@ -50,7 +50,7 @@ pub fn main(init: std.process.Init) !void {
 
     var m = Mame{ .arena = arena };
     try m.readTables(video_src);
-    try m.readKeys(kabuki_src, driver_src);
+    try m.readGames(kabuki_src, driver_src);
 
     var out_dir = cwd.openDir(io, out, .{ .iterate = true }) catch |err|
         fatal("cannot write to {s} ({t})", .{ out, err });
@@ -76,7 +76,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     try sweep(io, out_dir, written.items);
-    try index(arena, io, out_dir, written.items);
+    try index(arena, io, out_dir, written.items, try handWritten(arena, io, out_dir));
 
     std.debug.print("wrote {d} board files to {s}/\n", .{ written.items.len, out });
     if (skipped.items.len == 0) return;
@@ -101,9 +101,38 @@ fn sweep(io: std.Io, dir: std.Io.Dir, written: []const []const u8) !void {
     }
 }
 
+/// The boards in `hand/`, which this tool neither writes nor sweeps. MAME's
+/// CPS-1 tables are what it reads, so a generation it cannot read is typed out
+/// by a person; they still belong in the one list, so they are named here.
+/// Sorted, because a directory hands them over in whatever order it likes and
+/// this file is committed and diffed.
+fn handWritten(arena: std.mem.Allocator, io: std.Io, out_dir: std.Io.Dir) ![]const []const u8 {
+    var dir = out_dir.openDir(io, "hand", .{ .iterate = true }) catch return &.{};
+    defer dir.close(io);
+
+    var names: std.ArrayList([]const u8) = .empty;
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".board")) continue;
+        try names.append(arena, try arena.dupe(u8, entry.name[0 .. entry.name.len - ".board".len]));
+    }
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn less(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.less);
+    return names.items;
+}
+
 /// The list `src/boards.zig` reads: every board file beside it, embedded, so
 /// that a build of zicps carries them and a changed board file rebuilds it.
-fn index(arena: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, written: []const []const u8) !void {
+fn index(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    written: []const []const u8,
+    hand: []const []const u8,
+) !void {
     var aw: std.Io.Writer.Allocating = .init(arena);
     const w = &aw.writer;
     try w.writeAll(
@@ -116,6 +145,10 @@ fn index(arena: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, written: []const
     );
     for (written) |name| {
         try w.print("    .{{ .name = \"{s}\", .text = @embedFile(\"{s}.board\") }},\n", .{ name, name });
+    }
+    if (hand.len != 0) try w.writeAll("\n    // Under hand/, typed out rather than read off a table.\n");
+    for (hand) |name| {
+        try w.print("    .{{ .name = \"{s}\", .text = @embedFile(\"hand/{s}.board\") }},\n", .{ name, name });
     }
     try w.writeAll("};\n");
     try dir.writeFile(io, .{ .sub_path = "list.zig", .data = try aw.toOwnedSlice() });
@@ -314,6 +347,9 @@ const Mame = struct {
     arena: std.mem.Allocator,
     configs: std.StringHashMapUnmanaged(Config) = .empty,
     keys: std.StringHashMapUnmanaged(board.Kabuki) = .empty,
+    /// Each set's 68000 crystal, which is not in the config table at all: it is
+    /// the machine config the `GAME` row names.
+    clocks: std.StringHashMapUnmanaged(u32) = .empty,
     /// Why the set being built cannot be expressed, filled in on the way out.
     why: []const u8 = "",
 
@@ -405,10 +441,15 @@ const Mame = struct {
         }
     }
 
-    /// The four Kabuki keys, tied to the sets that use them the way MAME ties
-    /// them: a key belongs to a decode function, a decode function to an init
-    /// function, and an init function to the rows of the `GAME` list.
-    fn readKeys(m: *Mame, kabuki_src: []const u8, driver_src: []const u8) !void {
+    /// The two per-set things the `GAME` list carries: the Kabuki key, and the
+    /// 68000's crystal.
+    ///
+    /// A key belongs to a decode function, a decode function to an init
+    /// function, and an init function to a row. A crystal belongs to a machine
+    /// config, and configs derive from one another — only two lines in the whole
+    /// driver name a clock — so the chain is walked rather than the names
+    /// matched.
+    fn readGames(m: *Mame, kabuki_src: []const u8, driver_src: []const u8) !void {
         var by_decode: std.StringHashMapUnmanaged(board.Kabuki) = .empty;
         var lines = std.mem.splitScalar(u8, kabuki_src, '\n');
         while (lines.next()) |raw| {
@@ -442,16 +483,20 @@ const Mame = struct {
         // as far as MAME is concerned, and they have the same sound board. The
         // init function is not in the same column in all three, so it is found
         // by its name rather than counted to.
+        const by_config = try readConfigs(m.arena, driver_src);
+
         for ([_][]const u8{ "\nGAME", "\nCONS" }) |macro| {
             at = 0;
             while (std.mem.indexOfPos(u8, driver_src, at, macro)) |found| {
                 at = found + 1;
                 const row = try fields(m.arena, parens(driver_src, at) orelse continue);
                 if (row.len < 3) continue;
+                // `GAME`, `GAMEL` and `CONS` do not put the machine config or
+                // the init function in the same column, so both are found by
+                // name rather than counted to.
                 for (row) |field| {
-                    const key = by_init.get(field) orelse continue;
-                    try m.keys.put(m.arena, row[1], key);
-                    break;
+                    if (by_init.get(field)) |key| try m.keys.put(m.arena, row[1], key);
+                    if (by_config.get(field)) |hz| try m.clocks.put(m.arena, row[1], hz);
                 }
             }
         }
@@ -468,10 +513,12 @@ const Mame = struct {
         // around bootlegs one at a time. A board file cannot say any of it.
         if (config.kludge != 0)
             return m.give("MAME needs bootleg kludge 0x{x} for this set", .{config.kludge});
+        const cpu_hz = m.clocks.get(name) orelse
+            return m.give("no GAME row names a machine config, so nothing says which 68000 this board has", .{});
 
         var aw: std.Io.Writer.Allocating = .init(m.arena);
         const w = &aw.writer;
-        try head(w, name);
+        try head(w, name, cpu_hz);
         try m.map(w, block);
         try registers(w, config);
         if (m.keys.get(name)) |key|
@@ -485,7 +532,7 @@ const Mame = struct {
         return text;
     }
 
-    fn head(w: *std.Io.Writer, name: []const u8) !void {
+    fn head(w: *std.Io.Writer, name: []const u8, cpu_hz: u32) !void {
         try w.print(
             \\# Board file for MAME's `{s}`, written by tools/mame_to_board.zig.
             \\#
@@ -504,6 +551,9 @@ const Mame = struct {
             \\
         );
         try w.print("version = {d}\n", .{board.version});
+        // Soldered, not battery-backed, and the one number here that comes out
+        // of the machine config rather than the tables.
+        try w.print("cpu_clock = {d}\n", .{cpu_hz});
     }
 
     /// The ROM map, region by region, in the order the chips are listed on the
@@ -615,6 +665,7 @@ const Mame = struct {
                 .audio => romset.max_audio,
                 .qsound => romset.max_qsound,
                 .oki => romset.max_oki,
+                .key => romset.max_key,
             };
             if (size > max)
                 return m.give("0x{x} bytes of {s} ROM, and no board holds more than 0x{x}", .{ size, @tagName(region), max });
@@ -626,6 +677,78 @@ const Mame = struct {
         return error.Unsupported;
     }
 };
+
+// --------------------------------------------------------- the machine configs
+
+/// Every `cps_state::` machine config in the driver, resolved to the 68000
+/// crystal it ends up putting on the board.
+fn readConfigs(arena: std.mem.Allocator, driver_src: []const u8) !std.StringHashMapUnmanaged(u32) {
+    // A config either names a clock or inherits one from the config it opens
+    // by calling.
+    const Derived = struct { hz: ?u32 = null, from: ?[]const u8 = null };
+    var bodies: std.StringHashMapUnmanaged(Derived) = .empty;
+
+    const decl = "void cps_state::";
+    var at: usize = 0;
+    while (std.mem.indexOfPos(u8, driver_src, at, decl)) |found| {
+        const name = word(driver_src[found + decl.len ..]);
+        at = found + decl.len + name.len;
+        if (!std.mem.startsWith(u8, driver_src[at..], "(machine_config")) continue;
+        const body = braces(driver_src, at) orelse continue;
+        try bodies.put(arena, name, if (mainClock(body)) |hz|
+            .{ .hz = hz }
+        else
+            .{ .from = derivedFrom(body) });
+    }
+
+    var out: std.StringHashMapUnmanaged(u32) = .empty;
+    var it = bodies.iterator();
+    while (it.next()) |entry| {
+        var name = entry.key_ptr.*;
+        // A chain no deeper than the driver's, so a config that somehow calls
+        // itself is a config with no clock rather than a hang.
+        for (0..8) |_| {
+            const derived = bodies.get(name) orelse break;
+            if (derived.hz) |hz| {
+                try out.put(arena, entry.key_ptr.*, hz);
+                break;
+            }
+            name = derived.from orelse break;
+        }
+    }
+    return out;
+}
+
+/// The clock a config puts on the main CPU, if it is the one that names it.
+fn mainClock(body: []const u8) ?u32 {
+    for ([_][]const u8{ "M68000(config, m_maincpu, XTAL(", "m_maincpu->set_clock(XTAL(" }) |line| {
+        const at = std.mem.indexOf(u8, body, line) orelse continue;
+        return xtal(body[at + line.len ..]);
+    }
+    return null;
+}
+
+/// The config a config is built on: the first thing it does is call it.
+fn derivedFrom(body: []const u8) ?[]const u8 {
+    const call = "(config);";
+    const at = std.mem.indexOf(u8, body, call) orelse return null;
+    var start = at;
+    while (start > 0 and (std.ascii.isAlphanumeric(body[start - 1]) or body[start - 1] == '_')) start -= 1;
+    return if (start == at) null else body[start..at];
+}
+
+/// `10'000'000)`, the way MAME writes a crystal.
+fn xtal(text: []const u8) ?u32 {
+    var hz: u32 = 0;
+    for (text) |c| {
+        switch (c) {
+            '0'...'9' => hz = hz * 10 + (c - '0'),
+            '\'' => {},
+            else => return if (c == ')') hz else null,
+        }
+    }
+    return null;
+}
 
 /// One `ROM_LOAD` line, on its way to being one board file line.
 const Load = struct {

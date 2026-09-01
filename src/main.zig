@@ -9,16 +9,14 @@
 const std = @import("std");
 const board = @import("board");
 const romset = @import("romset");
-const cps1 = @import("cps1");
+const emu = @import("machine");
 const controls = @import("controls");
 const eeprom = @import("eeprom");
-const scheduler = @import("scheduler");
 const clock = @import("clock");
 const video = @import("video");
 const audio = @import("audio");
 const input = @import("input");
 const config = @import("config");
-const state = @import("state");
 const snow = @import("snow");
 const boards = @import("boards");
 const shell = @import("shell");
@@ -26,10 +24,9 @@ const shell = @import("shell");
 const rl = @cImport(@cInclude("raylib.h"));
 
 const Config = config.Config;
+/// The set that is in the board, which is not the machine running it: this one
+/// is the two files the user handed over, and `emu.Machine` is the hardware.
 const Machine = boards.Machine;
-
-/// The save-state format for this machine and its CPU.
-const st = state.Format(cps1.Machine, scheduler.Cpu);
 
 /// A replay log is one word per frame.
 const max_replay_bytes = 16 << 20;
@@ -184,11 +181,12 @@ pub fn main(init: std.process.Init) !void {
     const o = parseArgs(&args);
 
     // Two thirds of a megabyte of RAM, registers and framebuffer: too much for
-    // the stack, and allocated exactly once whatever set goes in it.
-    const c = try gpa.create(cps1.Machine);
+    // the stack, and allocated exactly once whatever set goes in it. Which arm
+    // of it is live is the board file's business, so it starts as the empty
+    // CPS-1 the idle window draws snow over.
+    const c = try gpa.create(emu.Machine);
     defer gpa.destroy(c);
-    c.* = .{ .board = .{}, .rom = .{ .program = &.{}, .gfx = &.{}, .audio = &.{}, .qsound = &.{}, .oki = &.{} } };
-    var cpu: scheduler.Cpu = .{};
+    c.start(.{}, .empty);
 
     var diag = board.Diag{};
     var machine: ?Machine = null;
@@ -206,15 +204,15 @@ pub fn main(init: std.process.Init) !void {
             std.debug.print("--frames needs a set to run\n", .{});
             fail();
         });
-        startMachine(c, &cpu, m);
-        return headless(io, gpa, c, &cpu, n, o.replay, o.record, o.every_frame);
+        startMachine(c, m);
+        return headless(io, gpa, c, n, o.replay, o.record, o.every_frame);
     }
 
     const cfg_path = try configPath(gpa, init.environ_map);
     defer gpa.free(cfg_path);
     var cfg = loadConfig(io, gpa, cfg_path);
 
-    try windowed(io, gpa, c, &cpu, &cfg, &machine, .{
+    try windowed(io, gpa, c, &cfg, &machine, .{
         .config = cfg_path,
         .set = o.set,
         .board = o.board,
@@ -240,10 +238,8 @@ fn loadConfig(io: std.Io, gpa: std.mem.Allocator, path: []const u8) Config {
 ///
 /// The EEPROM does not survive this, because it is a battery, not a chip: the
 /// caller writes it out and reads it back around the call (`flushNv`).
-fn startMachine(c: *cps1.Machine, cpu: *scheduler.Cpu, m: *const Machine) void {
-    c.* = .{ .board = m.b, .rom = m.rom };
-    cpu.* = .{};
-    scheduler.reset(c, cpu);
+fn startMachine(c: *emu.Machine, m: *const Machine) void {
+    c.start(m.b, m.rom);
 }
 
 // ------------------------------------------------------------------ headless
@@ -251,8 +247,7 @@ fn startMachine(c: *cps1.Machine, cpu: *scheduler.Cpu, m: *const Machine) void {
 fn headless(
     io: std.Io,
     gpa: std.mem.Allocator,
-    c: *cps1.Machine,
-    cpu: *scheduler.Cpu,
+    c: *emu.Machine,
     n: u32,
     replay_path: ?[]const u8,
     record_path: ?[]const u8,
@@ -270,16 +265,18 @@ fn headless(
 
     var sound = Sound{};
     var frame: u32 = 0;
-    while (frame < n and !cpu.halted) : (frame += 1) {
-        if (replay) |r| c.inputs = r.at(frame);
-        if (log) |*r| try record(r, gpa, c.inputs);
-        scheduler.runFrame(c, cpu);
-        sound.drain(&c.mixer);
-        if (every_frame) report(c, cpu, &sound, frame + 1);
+    const inputs = c.part("inputs");
+    while (frame < n and !c.cpu().halted) : (frame += 1) {
+        if (replay) |r| inputs.* = r.at(frame);
+        if (log) |*r| try record(r, gpa, inputs.*);
+        c.runFrame();
+        sound.drain(c.part("mixer"));
+        if (every_frame) report(c, &sound, frame + 1);
     }
-    if (!every_frame) report(c, cpu, &sound, frame);
+    if (!every_frame) report(c, &sound, frame);
     if (log) |*r| try writeLog(io, record_path.?, r.items);
 
+    const cpu = c.cpu();
     if (cpu.halted) {
         std.debug.print("the 68000 halted at pc={x:0>6} sr={x:0>4} after {d} frames\n", .{ cpu.pc, @as(u16, @bitCast(cpu.sr)), frame });
         fail();
@@ -313,12 +310,12 @@ const Sound = struct {
     }
 };
 
-fn report(c: *const cps1.Machine, cpu: *const scheduler.Cpu, sound: *const Sound, frame: u32) void {
+fn report(c: *emu.Machine, sound: *const Sound, frame: u32) void {
     // A copy, because finishing the hash consumes it and the run goes on.
     var h = sound.h;
     std.debug.print("frame {d} hash={x:0>16} audio={x:0>16} samples={d} peak={d}\n", .{
         frame,
-        scheduler.hash(c, cpu),
+        c.hash(),
         h.final(),
         sound.frames,
         sound.peak,
@@ -356,22 +353,23 @@ fn nvPath(buf: []u8, set: []const u8) ![]const u8 {
 /// Read once when the set goes in. A short or missing file leaves the chip
 /// erased, which is what an unused battery reads as and what sends the board
 /// into its own service menu to be set up.
-fn loadNv(io: std.Io, c: *cps1.Machine, set: []const u8) void {
+fn loadNv(io: std.Io, c: *emu.Machine, set: []const u8) void {
     var buf: [shell.max_path]u8 = undefined;
     const path = nvPath(&buf, set) catch return;
     var bytes: [eeprom.bytes]u8 = @splat(0xff);
     const read = std.Io.Dir.cwd().readFile(io, path, &bytes) catch return;
-    c.eeprom.load(read);
+    c.part("eeprom").load(read);
 }
 
-fn flushNv(io: std.Io, c: *cps1.Machine, set: []const u8) !void {
-    if (!c.eeprom.dirty) return;
+fn flushNv(io: std.Io, c: *emu.Machine, set: []const u8) !void {
+    const chip = c.part("eeprom");
+    if (!chip.dirty) return;
     var buf: [shell.max_path]u8 = undefined;
     const path = try nvPath(&buf, set);
     var bytes: [eeprom.bytes]u8 = undefined;
-    c.eeprom.save(&bytes);
+    chip.save(&bytes);
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = &bytes });
-    c.eeprom.dirty = false;
+    chip.dirty = false;
 }
 
 // -------------------------------------------------------------- save states
@@ -389,11 +387,10 @@ fn saveState(w: *Window, slot: usize) void {
     var path_buf: [shell.max_path]u8 = undefined;
     const path = statePath(&path_buf, w.set, slot) catch return;
     // A state is the machine's own size, which is far more than a stack frame.
-    const buf = w.gpa.create([st.bytes]u8) catch |err| return w.ui.status("{t}", .{err});
+    const buf = w.gpa.create([emu.Machine.max_state_bytes]u8) catch |err| return w.ui.status("{t}", .{err});
     defer w.gpa.destroy(buf);
 
-    st.save(w.c, w.cpu, buf);
-    std.Io.Dir.cwd().writeFile(w.io, .{ .sub_path = path, .data = buf }) catch |err| {
+    std.Io.Dir.cwd().writeFile(w.io, .{ .sub_path = path, .data = w.c.save(buf) }) catch |err| {
         return w.ui.status("cannot write {s}: {t}", .{ path, err });
     };
 
@@ -409,13 +406,13 @@ fn loadState(w: *Window, slot: usize) void {
     var name: [shell.max_slot_name]u8 = undefined;
     const slot_name = shell.slotLabel(slot, &name);
 
-    const buf = std.Io.Dir.cwd().readFileAlloc(w.io, path, w.gpa, st.limit) catch |err| {
+    const buf = std.Io.Dir.cwd().readFileAlloc(w.io, path, w.gpa, emu.Machine.state_limit) catch |err| {
         return w.ui.status("{s}: {t}", .{ slot_name, err });
     };
     defer w.gpa.free(buf);
     // A state from another build is refused here rather than loaded as
     // garbage, and the machine that was running is still running.
-    st.load(w.c, w.cpu, buf) catch |err| return w.ui.status("{s}: {t}", .{ slot_name, err });
+    w.c.load(buf) catch |err| return w.ui.status("{s}: {t}", .{ slot_name, err });
     w.ui.status("loaded {s}", .{slot_name});
 }
 
@@ -470,7 +467,7 @@ fn romRow(ui: *shell.Ui, name: []const u8, count: usize, bytes: usize) void {
 /// The card the menu shows beside itself: what the set and the board file
 /// turned out to say, all of it read out of the two files the user supplied.
 /// Built when the set goes in, because none of it changes while the game plays.
-fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8) void {
+fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8, suicided: bool) void {
     shell.cardStart(ui, std.fs.path.basename(set), m.from());
 
     var regions = std.EnumArray(board.Region, usize).initFill(0);
@@ -490,8 +487,15 @@ fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8) void {
     // rather than a setting: without it the Z80 runs garbage and the cabinet
     // is silent, so whether there is one is worth a line of its own. Only a
     // QSound board has one to be missing.
-    if (!plain) shell.cardRow(ui, "KABUKI", if (m.b.kabuki == null) .bad else .good, "{s}", .{
+    if (!plain and m.b.system == .cps1) shell.cardRow(ui, "KABUKI", if (m.b.kabuki == null) .bad else .good, "{s}", .{
         if (m.b.kabuki == null) "NO KEY" else "KEY SET",
+    });
+    // A CPS-2 board's key is in the set rather than the board file, and a board
+    // whose battery went flat reads back as one that says nothing. It still
+    // runs — on its own ciphertext, into a self-test that fails — so this is a
+    // line on the card and not a refusal.
+    if (m.b.system == .cps2) shell.cardRow(ui, "KEY", if (suicided) .bad else .good, "{s}", .{
+        if (suicided) "SUICIDED BOARD" else "DECRYPTED",
     });
     // Which CPS-B-21 batch this board is, as far as anything can tell from
     // outside: the register offsets the chip was strapped for. Each reading
@@ -533,10 +537,11 @@ fn keyDown(key: u32) bool {
 /// Hands raylib a full sub-buffer whenever it has one free and the mixer has
 /// one ready. Polling like this is the pattern raylib's own audio-stream
 /// example uses, so there is no callback thread to synchronize with.
-fn drainAudio(c: *cps1.Machine, stream: rl.AudioStream) void {
-    while (c.mixer.ready() >= audio_chunk_frames and rl.IsAudioStreamProcessed(stream)) {
+fn drainAudio(c: *emu.Machine, stream: rl.AudioStream) void {
+    const mixer = c.part("mixer");
+    while (mixer.ready() >= audio_chunk_frames and rl.IsAudioStreamProcessed(stream)) {
         var pcm: [audio_chunk_frames]audio.Frame = undefined;
-        for (&pcm) |*frame| frame.* = c.mixer.pop().?;
+        for (&pcm) |*frame| frame.* = mixer.pop().?;
         rl.UpdateAudioStream(stream, &pcm, pcm.len);
     }
 }
@@ -544,15 +549,16 @@ fn drainAudio(c: *cps1.Machine, stream: rl.AudioStream) void {
 /// Sleeps off the surplus once the mixer is further ahead of playback than the
 /// target; being behind returns immediately, so the emulator catches up on its
 /// own without ever needing to skip a frame.
-fn paceToAudio(c: *cps1.Machine, io: std.Io) void {
-    if (c.mixer.ready() <= audio_target_frames) return;
-    const surplus_ms = (c.mixer.ready() - audio_target_frames) * std.time.ms_per_s / audio.sample_rate;
+fn paceToAudio(c: *emu.Machine, io: std.Io) void {
+    const ready = c.part("mixer").ready();
+    if (ready <= audio_target_frames) return;
+    const surplus_ms = (ready - audio_target_frames) * std.time.ms_per_s / audio.sample_rate;
     io.sleep(.fromMilliseconds(@intCast(surplus_ms)), .awake) catch {};
 }
 
-fn fbImage(c: *cps1.Machine) rl.Image {
+fn fbImage(c: *emu.Machine) rl.Image {
     return .{
-        .data = &c.v.fb,
+        .data = &c.part("v").fb,
         .width = video.width,
         .height = video.height,
         .mipmaps = 1,
@@ -577,8 +583,7 @@ const WindowedArgs = struct {
 const Window = struct {
     io: std.Io,
     gpa: std.mem.Allocator,
-    c: *cps1.Machine,
-    cpu: *scheduler.Cpu,
+    c: *emu.Machine,
     cfg: *Config,
     machine: *?Machine,
     args: WindowedArgs,
@@ -609,8 +614,7 @@ const Window = struct {
 fn windowed(
     io: std.Io,
     gpa: std.mem.Allocator,
-    c: *cps1.Machine,
-    cpu: *scheduler.Cpu,
+    c: *emu.Machine,
     cfg: *Config,
     machine: *?Machine,
     args: WindowedArgs,
@@ -640,7 +644,6 @@ fn windowed(
         .io = io,
         .gpa = gpa,
         .c = c,
-        .cpu = cpu,
         .cfg = cfg,
         .machine = machine,
         .args = args,
@@ -665,9 +668,9 @@ fn windowed(
     if (args.set.len != 0) w.set = keepPath(&w.path_buf, args.set);
     if (machine.*) |*m| {
         remember(cfg, &w.ui, w.set);
-        startMachine(c, cpu, m);
+        startMachine(c, m);
         loadNv(io, c, w.set);
-        describeBoard(&w.ui, m, w.set);
+        describeBoard(&w.ui, m, w.set, c.suicided());
     }
 
     try runLoop(&w);
@@ -688,7 +691,7 @@ fn openWindow(cfg: *const Config) !void {
 /// One drawn frame a turn: what the shell asked for, what the machine ran of
 /// it, and what is drawn of that.
 fn runLoop(w: *Window) !void {
-    while (!rl.WindowShouldClose() and !w.quit and !w.cpu.halted) {
+    while (!rl.WindowShouldClose() and !w.quit and !w.c.cpu().halted) {
         try serveRequest(w);
         refreshSlots(w);
         applyOptions(w);
@@ -708,7 +711,7 @@ fn closeOut(w: *Window) !void {
     if (w.log) |*r| try writeLog(w.io, w.args.record.?, r.items);
     if (w.frames == 0) return;
     var sound = Sound{};
-    report(w.c, w.cpu, &sound, w.frames);
+    report(w.c, &sound, w.frames);
 }
 
 /// Whatever the shell asked for this frame.
@@ -722,7 +725,7 @@ fn serveRequest(w: *Window) !void {
         // make the menu pointless.
         .reset => if (w.machine.*) |*m| {
             saveNv(w);
-            startMachine(w.c, w.cpu, m);
+            startMachine(w.c, m);
             loadNv(w.io, w.c, w.set);
             w.frames = 0;
         },
@@ -756,9 +759,9 @@ fn loadIntoWindow(w: *Window, path: []const u8) void {
     w.machine.* = next;
     w.set = keepPath(&w.path_buf, path);
     remember(w.cfg, &w.ui, w.set);
-    startMachine(w.c, w.cpu, &next);
+    startMachine(w.c, &next);
     loadNv(w.io, w.c, w.set);
-    describeBoard(&w.ui, &next, w.set);
+    describeBoard(&w.ui, &next, w.set, w.c.suicided());
     w.ui.status("{s}: {d} KiB program, {d} KiB graphics", .{
         std.fs.path.basename(w.set),
         next.rom.program.len >> 10,
@@ -794,8 +797,8 @@ fn applyOptions(w: *Window) void {
         w.applied_scale = w.cfg.scale;
     }
     // The mixer is where the volume knob lives, so muted is volume 0.
-    w.c.mixer.volume_pct = if (w.cfg.audio) w.cfg.volume else 0;
-    if (w.c.eeprom.dirty and rl.GetTime() >= w.nv_next) {
+    w.c.part("mixer").volume_pct = if (w.cfg.audio) w.cfg.volume else 0;
+    if (w.c.part("eeprom").dirty and rl.GetTime() >= w.nv_next) {
         saveNv(w);
         w.nv_next = rl.GetTime() + nv_write_seconds;
     }
@@ -807,14 +810,14 @@ fn stepFrames(w: *Window) !bool {
     // Whatever the panel ended the frame holding is what the menu draws lit,
     // whether the machine ran or not.
     defer {
-        w.ui.pad = w.c.inputs.pad[0];
-        w.ui.panel = w.c.inputs.panel;
+        w.ui.pad = w.c.part("inputs").pad[0];
+        w.ui.panel = w.c.part("inputs").panel;
         w.ui.six = w.cfg.buttons == .six;
     }
 
     const running = w.machine.* != null and !w.ui.open and (!w.ui.paused or w.ui.step);
     if (!running) {
-        w.c.inputs = .{};
+        w.c.part("inputs").* = .{};
         return false;
     }
 
@@ -823,9 +826,9 @@ fn stepFrames(w: *Window) !bool {
     // per emulated frame, so a replay of it is a replay.
     const steps: u32 = if (w.ui.step or !w.ui.fast) 1 else fast_forward_frames;
     for (0..steps) |_| {
-        w.c.inputs = if (w.replay) |r| r.at(w.frames) else readPanel(w.cfg.*);
-        if (w.log) |*r| try record(r, w.gpa, w.c.inputs);
-        scheduler.runFrame(w.c, w.cpu);
+        w.c.part("inputs").* = if (w.replay) |r| r.at(w.frames) else readPanel(w.cfg.*);
+        if (w.log) |*r| try record(r, w.gpa, w.c.part("inputs").*);
+        w.c.runFrame();
         w.frames += 1;
         // Drained inside the loop: the ring holds well under a
         // fast-forwarded burst, so it has to go out as it is made.
@@ -857,7 +860,7 @@ fn paceDrawing(w: *Window, running: bool) void {
 fn drawFrame(w: *Window) void {
     rl.BeginDrawing();
     if (w.machine.* != null) {
-        rl.UpdateTexture(w.tex, &w.c.v.fb);
+        rl.UpdateTexture(w.tex, &w.c.part("v").fb);
         drawPicture(w.tex, video.width, video.height);
         if (w.cfg.scanlines) shell.drawScanlines(video.height);
     } else {

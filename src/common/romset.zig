@@ -25,6 +25,8 @@ pub const max_audio = 512 << 10;
 pub const max_qsound = 8 << 20;
 /// Every set in MAME's CPS-1 driver fills the M6295's two banks and no more.
 pub const max_oki = 256 << 10;
+/// CPS-2's key is twenty bytes in a region MAME rounds up to 0x20.
+pub const max_key = 0x20;
 /// No chip on either board is bigger than this, so no file needs to be.
 pub const max_file = 8 << 20;
 
@@ -42,6 +44,18 @@ pub const Set = struct {
     qsound: []u8,
     /// OKI M6295 sample ROM: ADPCM phrases behind an eight-bit bank.
     oki: []u8,
+    /// CPS-2's twenty-byte decryption key. All-ones on a board whose battery
+    /// has gone, which is a state the hardware has and so one this has too.
+    key: []u8 = &.{},
+    /// The program region as the 68000 fetches opcodes out of it. On CPS-1 it
+    /// is the program itself; on CPS-2 it is what `cps2/crypt.zig` made of it
+    /// at load, and the two differ everywhere the key covers.
+    decrypted: []u8 = &.{},
+
+    /// A board with nothing in it, for the tests and for a frontend with no set
+    /// loaded. Every slice is empty rather than absent: a read off the end of a
+    /// region is already the open bus.
+    pub const empty: Set = .{ .program = &.{}, .gfx = &.{}, .audio = &.{}, .qsound = &.{}, .oki = &.{} };
 
     pub fn deinit(s: *Set, gpa: std.mem.Allocator) void {
         gpa.free(s.program);
@@ -49,6 +63,10 @@ pub const Set = struct {
         gpa.free(s.audio);
         gpa.free(s.qsound);
         gpa.free(s.oki);
+        gpa.free(s.key);
+        // The decrypted view is a second copy of the program only when there
+        // was something to decrypt; otherwise it is the program itself.
+        if (s.decrypted.ptr != s.program.ptr) gpa.free(s.decrypted);
         s.* = undefined;
     }
 };
@@ -76,6 +94,8 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
     errdefer gpa.free(qsound);
     const oki = try alloc(gpa, sizes.get(.oki));
     errdefer gpa.free(oki);
+    const key = try alloc(gpa, sizes.get(.key));
+    errdefer gpa.free(key);
 
     const packed_gfx = try alloc(gpa, sizes.get(.gfx));
     defer gpa.free(packed_gfx);
@@ -86,13 +106,20 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
         .audio = audio,
         .qsound = qsound,
         .oki = oki,
+        .key = key,
     }), diag);
 
     const gfx = try alloc(gpa, packed_gfx.len * pixels_per_byte);
     errdefer gpa.free(gfx);
     decode(packed_gfx, gfx);
 
-    return .{ .program = program, .gfx = gfx, .audio = audio, .qsound = qsound, .oki = oki };
+    // `decrypted` is the program itself where the 68000 fetches opcodes out of
+    // the ROM, which is every CPS-1 board. A CPS-2 board reads its opcodes from
+    // a second copy that `cps2/crypt.zig` fills at start; the room for it is
+    // taken here, because this is where the allocator is.
+    const decrypted = if (b.system == .cps2) try gpa.dupe(u8, program) else program;
+
+    return .{ .program = program, .gfx = gfx, .audio = audio, .qsound = qsound, .oki = oki, .key = key, .decrypted = decrypted };
 }
 
 /// Reads every chip the board file names into the region it belongs to. A file
@@ -100,7 +127,15 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
 /// is not the chip the file was written for, stops the load here.
 fn fill(gpa: std.mem.Allocator, src: *Source, b: *const board.Board, regions: std.EnumArray(board.Region, []u8), diag: *Diag) Error!void {
     for (b.romList()) |rom| {
-        const bytes = try src.read(rom);
+        // A key ROM the set does not have, or has damaged, is a board whose
+        // battery has gone: the region stays blank, the program decrypts to its
+        // own ciphertext, and the machine says `suicided board`. Every other
+        // region is a refusal, because a board missing one of those is not a
+        // board that ran on a bench either.
+        const bytes = src.read(rom) catch |err| {
+            if (rom.region == .key) continue;
+            return err;
+        };
         defer gpa.free(bytes);
 
         const want = @as(u64, rom.src) + rom.len;
@@ -138,6 +173,7 @@ fn limit(region: board.Region) u64 {
         .audio => max_audio,
         .qsound => max_qsound,
         .oki => max_oki,
+        .key => max_key,
     };
 }
 
@@ -497,7 +533,7 @@ test "a set under the right name that is not the right dump is refused" {
 }
 
 test "a board file asking for more than a board can hold is refused" {
-    var sizes = [board.region_count]u64{ max_program + 1, 0, 0, 0, 0 };
+    var sizes = [board.region_count]u64{ max_program + 1, 0, 0, 0, 0, 0 };
     var diag = board.Diag{};
     try testing.expectError(error.BadRomSet, cap(&sizes, &diag));
     try testing.expect(std.mem.indexOf(u8, diag.message(), "program") != null);

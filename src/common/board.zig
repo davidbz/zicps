@@ -46,6 +46,15 @@ fn nameList(comptime E: type) []const u8 {
     }
 }
 
+/// The 68000 crystals this family shipped on, which is a number soldered to a
+/// board and so a line in its file. MAME's base CPS-1 config is the 10 MHz one
+/// and `cps1_12MHz` the override, so roughly half the library is the slow one.
+pub const cps1_slow_cpu_hz = 10_000_000;
+pub const cps1_cpu_hz = 12_000_000;
+pub const cps2_cpu_hz = 16_000_000;
+/// All three, for `clock.zig` to check its reference against.
+pub const cpu_rates = [_]u32{ cps1_slow_cpu_hz, cps1_cpu_hz, cps2_cpu_hz };
+
 /// Which chips a tile code range lives on, and the same four bank sizes the
 /// B-board's PAL switches between.
 pub const gfx_banks = 4;
@@ -62,8 +71,16 @@ pub const Kabuki = struct {
     xor: u8,
 };
 
-/// Which chip on the board a file's bytes belong to.
-pub const Region = enum { program, gfx, audio, qsound, oki };
+/// Which generation the board is. `cps1` covers CPS-1 and CPS-1.5, which differ
+/// only in their sound board; `cps2` is the encrypted one. The default is
+/// `cps1` so that every board file written before there was a second generation
+/// still says what it always said.
+pub const System = enum { cps1, cps2 };
+
+/// Which chip on the board a file's bytes belong to. `key` is CPS-2's twenty
+/// bytes of decryption key, which on a real board is not a chip at all: it is
+/// the battery-backed RAM whose contents are what "suicide" takes away.
+pub const Region = enum { program, gfx, audio, qsound, oki, key };
 pub const region_count = @typeInfo(Region).@"enum".fields.len;
 /// The two sound boards: a Z80 behind a Kabuki with the DL-1425 beside it, or a
 /// plain Z80 with a YM2151 and an OKI M6295. `none` is a set with no sound ROM
@@ -133,6 +150,12 @@ pub const GfxRange = struct {
 };
 
 pub const Board = struct {
+    /// Which generation, and so which machine is built for this set.
+    system: System = .cps1,
+    /// The 68000's crystal. Not battery-backed data — it is soldered on — but
+    /// it is per-board and there is nowhere else a set says which board it is.
+    cpu_hz: u32 = cps1_cpu_hz,
+
     // CPS-B-21 register offsets. These are the ones the battery holds.
     layer_control: Reg = null,
     priority: [priority_groups]Reg = @splat(null),
@@ -221,6 +244,8 @@ pub const Error = error{BadBoardFile};
 /// are keys too, and are matched after these.
 const Key = enum {
     version,
+    system,
+    cpu_clock,
     layer_control,
     priority,
     palette_control,
@@ -247,6 +272,8 @@ const Parser = struct {
     /// message, and none of them can be reached from anywhere else.
     key: []const u8 = "",
     seen_version: bool = false,
+    /// A board file that names its own crystal keeps it whatever `system` says.
+    seen_cpu_clock: bool = false,
     // A board whose PAL decodes no priority mask at all writes the line out as
     // four `none`s, and a board file that forgot the line has not. The values
     // cannot tell those apart, so the line is remembered rather than read back.
@@ -308,6 +335,23 @@ fn applyKey(p: *Parser, k: Key, vals: *Tokens) Error!void {
             const v = try int(u32, p, vals);
             if (v != version) return p.bad("board file version {d}, this build reads {d}", .{ v, version });
             p.seen_version = true;
+        },
+        .system => {
+            const name = vals.next() orelse return p.bad("`system` needs one of " ++ nameList(System), .{});
+            b.system = std.meta.stringToEnum(System, name) orelse
+                return p.bad("`{s}` is not a system (" ++ nameList(System) ++ ")", .{name});
+            // The generations run different crystals, and a file that names
+            // one is taken at its word whichever order the two lines come in.
+            if (!p.seen_cpu_clock) b.cpu_hz = switch (b.system) {
+                .cps1 => cps1_cpu_hz,
+                .cps2 => cps2_cpu_hz,
+            };
+        },
+        .cpu_clock => {
+            p.seen_cpu_clock = true;
+            b.cpu_hz = try int(u32, p, vals);
+            if (std.mem.indexOfScalar(u32, &cpu_rates, b.cpu_hz) == null)
+                return p.bad("`cpu_clock` is {d} Hz, and no board in this family runs its 68000 at that", .{b.cpu_hz});
         },
         .layer_control => b.layer_control = try reg(p, vals),
         .priority => {
@@ -373,11 +417,13 @@ fn require(b: *const Board, seen_priority: bool, diag: *Diag) Error!void {
     return diag.say("board file is missing: {s}", .{w.buffered()});
 }
 
-/// Only the QSound board's Z80 is behind a Kabuki custom, so only that board's
-/// sound ROM decrypts to noise without a key. A CPS-1 board's Z80 is plain, and
-/// a set with no sound ROM at all — the in-repo test ROM — needs no key either.
+/// Only a CPS-1.5 board's Z80 is behind a Kabuki custom, so only that board's
+/// sound ROM decrypts to noise without a key. A CPS-1 board's Z80 is plain, a
+/// CPS-2 board's runs its ROM in clear behind the encryption on the *other*
+/// CPU, and a set with no sound ROM at all — the in-repo test ROM — needs no
+/// key either.
 fn needsKabuki(b: *const Board, diag: *Diag) Error!void {
-    if (b.kabuki != null or b.sound() != .qsound) return;
+    if (b.kabuki != null or b.system == .cps2 or b.sound() != .qsound) return;
     for (b.romList()) |r| {
         if (r.region == .audio)
             return diag.say("board file has a QSound sound ROM ({s}) but no `kabuki` key to decrypt it with", .{r.name});

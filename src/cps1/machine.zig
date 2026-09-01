@@ -228,7 +228,7 @@ fn cboard(c: *Machine, offset: u8) u16 {
     if (c.board.in2_offset) |off| {
         if (off == offset) return in2(c);
     }
-    return video.readB(&c.v, &c.board, offset);
+    return chip.readB(&c.v, &c.board, offset);
 }
 
 fn in2(c: *const Machine) u16 {

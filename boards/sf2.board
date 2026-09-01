@@ -5,6 +5,7 @@
 # transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
 # and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
 version = 1
+cpu_clock = 10000000
 
 program = 0x000000 0x020000 byte16 sf2e_30g.11e crc=0xfe39ee33
 program = 0x000001 0x020000 byte16 sf2e_37g.11f crc=0xfb92cd74

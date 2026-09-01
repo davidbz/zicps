@@ -8,6 +8,7 @@
 # Untested: nobody here has this set to boot, so this file is only as
 # right as the table it came from.
 version = 1
+cpu_clock = 12000000
 
 program = 0x000000 0x080000 word   sf2ca_23-c.bin crc=0xe7c8c5a6
 program = 0x080000 0x080000 word   sf2ca_22-c.bin crc=0x99f1cca4

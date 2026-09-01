@@ -8,6 +8,7 @@
 # Untested: nobody here has this set to boot, so this file is only as
 # right as the table it came from.
 version = 1
+cpu_clock = 10000000
 
 program = 0x000000 0x080000 word   ccj_23f.8f crc=0x5b482b62
 program = 0x080000 0x080000 word   ccj_22f.7f crc=0x0fd34195

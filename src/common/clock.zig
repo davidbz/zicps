@@ -1,8 +1,8 @@
 //! The clocks, and the sound board's share of a line.
 //!
 //! A CP System board has three independent oscillators and no master clock, so
-//! time here is a 120 MHz reference tick: the smallest rate that divides all
-//! four of the board's into integers. It is a modelling convenience, not a wire
+//! time here is a 240 MHz reference tick: the smallest rate that divides all
+//! of the family's into integers. It is a modelling convenience, not a wire
 //! on the board.
 //!
 //! A line is the step. Each CPU gets a line's worth of cycles, and because an
@@ -16,6 +16,8 @@
 //! shared RAM, so what it owes per line is here and is asked for by both.
 
 const std = @import("std");
+const board = @import("board");
+const m68k = @import("m68k");
 const video = @import("video");
 const audio = @import("audio");
 const oki = @import("oki");
@@ -23,32 +25,38 @@ const qsound = @import("qsound");
 const soundboard = @import("soundboard");
 const ym2151 = @import("ym2151");
 
-pub const reference_hz = 120_000_000;
-pub const cpu_hz = 12_000_000;
+pub const reference_hz = 240_000_000;
 pub const sound_hz = 8_000_000;
 pub const pixel_hz = 8_000_000;
 
-pub const ref_per_cpu = reference_hz / cpu_hz;
 pub const ref_per_sound = reference_hz / sound_hz;
 pub const ref_per_dot = reference_hz / pixel_hz;
 
 pub const ref_per_line = ref_per_dot * video.dots_per_line;
 pub const ref_per_frame = ref_per_line * video.lines_per_frame;
 
-/// 7680 reference ticks a line divide by 10 and by 15 exactly, so neither CPU
-/// carries a remainder from line to line and neither needs a debt counter of
-/// its own. QSound's 4992 does not divide evenly, and brings the debt
-/// machinery with it.
-pub const cpu_per_line = ref_per_line / ref_per_cpu;
+/// 15,360 reference ticks a line divide by 30 exactly, so the Z80 carries no
+/// remainder from line to line and needs no debt counter of its own. QSound's
+/// 9984 does not divide evenly, and brings the debt machinery with it.
 pub const sound_per_line = ref_per_line / ref_per_sound;
 
+/// Cycles a 68000 on `hz` is owed for one line. Which rate that is is the
+/// board's — MAME shipped this family at 10, 12 and 16 MHz — and the reference
+/// is 240 MHz so that all three come out whole.
+pub fn cpuPerLine(hz: u32) u64 {
+    return ref_per_line / (reference_hz / hz);
+}
+
 comptime {
-    std.debug.assert(ref_per_line % ref_per_cpu == 0);
     std.debug.assert(ref_per_line % ref_per_sound == 0);
+    for (board.cpu_rates) |hz| {
+        std.debug.assert(reference_hz % hz == 0);
+        std.debug.assert(ref_per_line % (reference_hz / hz) == 0);
+    }
 }
 
 /// The QSound chip's own crystal and the divider it runs its sample clock at:
-/// one stereo frame every 4992 reference ticks, 24.038 kHz.
+/// one stereo frame every 9984 reference ticks, 24.038 kHz.
 pub const qsound_hz = 60_000_000;
 pub const qsound_divider = 2496;
 pub const ref_per_sample = reference_hz / qsound_hz * qsound_divider;
@@ -127,6 +135,36 @@ pub const Timing = struct {
     /// Wider than a sample, because the chip sums four voices without a limiter.
     oki_out: i32 = 0,
 };
+
+/// The 68000's share of a line: the cycles its own crystal owes it, less
+/// whatever the last line overran by, with this line's overrun carried forward
+/// the same way the sound Z80's is. Generic over the machine, because the bus
+/// is the only thing the two generations disagree about here and `m68k.Core` is
+/// generic over that already — what order the rest of the line goes in is each
+/// machine's own, and stays with it.
+pub fn runCpu(comptime M: type, c: *M, cpu: *m68k.Cpu, hz: u32) void {
+    const Core = m68k.Core(M);
+    const owed = cpuPerLine(hz);
+    // A line whose predecessor overran by more than a whole line's budget owes
+    // the difference forward rather than running backwards.
+    const budget = owed -| c.t.cpu_over;
+    const start = cpu.cycles;
+
+    // The interrupt is a level held on a pin, and the board drops it when the
+    // 68000 acknowledges. z68k has no acknowledge hook, so a line with one
+    // still on the pin is stepped rather than run, and the pin is dropped the
+    // instant the vector is entered — otherwise a handler that returns inside
+    // the same line takes the same vblank over and over.
+    while (cpu.pending_ipl != 0 and cpu.cycles -% start < budget) {
+        const takeable = cpu.pending_ipl > cpu.sr.ipl;
+        Core.step(cpu, c);
+        if (takeable) Core.setIpl(cpu, 0);
+    }
+    const stepped = cpu.cycles -% start;
+    if (stepped < budget) _ = Core.run(cpu, c, budget - stepped);
+
+    c.t.cpu_over = c.t.cpu_over + (cpu.cycles -% start) - owed;
+}
 
 /// The sound board's share of the same line: the Z80's cycles, the interrupts
 /// its divider raised while they ran, and the samples the chip finished.
@@ -246,9 +284,13 @@ test "the sound Z80 is owed exactly what it is given, line after line" {
 }
 
 test "one line is the same slice of time for every part of the board" {
-    try testing.expectEqual(@as(u64, 7680), ref_per_line);
-    try testing.expectEqual(@as(u64, 768), cpu_per_line);
+    try testing.expectEqual(@as(u64, 15360), ref_per_line);
     try testing.expectEqual(@as(u64, 512), sound_per_line);
+    // §3.3's table, from the other end: what a line is worth to each of the
+    // three 68000s this family shipped.
+    try testing.expectEqual(@as(u64, 640), cpuPerLine(board.cps1_slow_cpu_hz));
+    try testing.expectEqual(@as(u64, 768), cpuPerLine(board.cps1_cpu_hz));
+    try testing.expectEqual(@as(u64, 1024), cpuPerLine(board.cps2_cpu_hz));
     // 59.6374 Hz, to four places, without floating point in a constant.
     try testing.expectEqual(@as(u64, 596374), refresh_num * 10_000 / refresh_den);
 }

@@ -197,4 +197,7 @@ pub const files = [_]struct { name: []const u8, text: []const u8 }{
     .{ .name = "sfach", .text = @embedFile("sfach.board") },
     .{ .name = "sfzch", .text = @embedFile("sfzch.board") },
     .{ .name = "sfzbch", .text = @embedFile("sfzbch.board") },
+
+    // Under hand/, typed out rather than read off a table.
+    .{ .name = "ddtod", .text = @embedFile("hand/ddtod.board") },
 };
