@@ -1,0 +1,80 @@
+# Board file for MAME's `ssf2xjr1r`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   sfxo.03c crc=0x2ba33dc6
+program = 0x080000 0x080000 word   sfxo.04a crc=0xba663dd7
+program = 0x100000 0x080000 word   sfxo.05 crc=0x1321625c
+program = 0x180000 0x080000 word   sfxo.06a crc=0x0cc490ed
+program = 0x200000 0x080000 word   sfxo.07 crc=0x64b9015e
+program = 0x280000 0x080000 word   sfxo.08 crc=0xb60f4b58
+program = 0x300000 0x080000 word   sfxo.09 crc=0x642fae3f
+
+gfx = 0x000000 0x080000 word64 ssf.69 crc=0xe9123f9f
+gfx = 0x200000 0x080000 word64 ssf.70 crc=0x2f8201f3
+gfx = 0x400000 0x080000 word64 ssf.71 crc=0x0fa334b4
+gfx = 0x600000 0x080000 word64 ssf.72 crc=0xb76740d3
+gfx = 0x800000 0x080000 word64 ssf.73 crc=0x14f058ec
+gfx = 0xa00000 0x080000 word64 ssf.74 crc=0x800c3ae9
+gfx = 0xc00000 0x080000 word64 sfx.75 crc=0x06cf540b
+gfx = 0xe00000 0x080000 word64 sfx.76 crc=0x71084e42
+gfx = 0x000002 0x080000 word64 ssf.59 crc=0x6eb3ee4d
+gfx = 0x200002 0x080000 word64 ssf.60 crc=0x2bcf1eda
+gfx = 0x400002 0x080000 word64 ssf.61 crc=0x3330cc11
+gfx = 0x600002 0x080000 word64 ssf.62 crc=0x96e2ead3
+gfx = 0x800002 0x080000 word64 ssf.63 crc=0xe356a275
+gfx = 0xa00002 0x080000 word64 ssf.64 crc=0xfec5698b
+gfx = 0xc00002 0x080000 word64 sfx.65 crc=0x69da0751
+gfx = 0xe00002 0x080000 word64 sfx.66 crc=0xcc53ec15
+gfx = 0x000004 0x080000 word64 ssf.79 crc=0xcf0d44a8
+gfx = 0x200004 0x080000 word64 ssf.80 crc=0x56a153a4
+gfx = 0x400004 0x080000 word64 ssf.81 crc=0x5484e5f6
+gfx = 0x600004 0x080000 word64 ssf.82 crc=0xfce6b7f5
+gfx = 0x800004 0x080000 word64 ssf.83 crc=0x042d7970
+gfx = 0xa00004 0x080000 word64 ssf.84 crc=0x88c472e6
+gfx = 0xc00004 0x080000 word64 sfx.85 crc=0xa7d66348
+gfx = 0xe00004 0x080000 word64 sfx.86 crc=0xcf9119c8
+gfx = 0x000006 0x080000 word64 ssf.89 crc=0x6d374ad9
+gfx = 0x200006 0x080000 word64 ssf.90 crc=0x34cf8bcf
+gfx = 0x400006 0x080000 word64 ssf.91 crc=0xd796ea3f
+gfx = 0x600006 0x080000 word64 ssf.92 crc=0xc85fb7e3
+gfx = 0x800006 0x080000 word64 ssf.93 crc=0x6c50c2b5
+gfx = 0xa00006 0x080000 word64 ssf.94 crc=0x59549f63
+gfx = 0xc00006 0x080000 word64 sfx.95 crc=0x86c97869
+gfx = 0xe00006 0x080000 word64 sfx.96 crc=0x1c0e1989
+
+audio = 0x000000 0x008000 byte   sfx.01 crc=0xb47b8835
+audio = 0x010000 0x018000 byte   sfx.01 0x8000 crc=0xb47b8835
+audio = 0x028000 0x020000 byte   sfx.02 crc=0x0022633f
+
+qsound = 0x000000 0x080000 word   ssf.51a crc=0x9eda6954
+qsound = 0x080000 0x080000 word   ssf.52a crc=0x355f6589
+qsound = 0x100000 0x080000 word   ssf.53a crc=0xd5d08a05
+qsound = 0x180000 0x080000 word   ssf.54a crc=0x930725eb
+qsound = 0x200000 0x080000 word   ssf.55a crc=0x827abf3c
+qsound = 0x280000 0x080000 word   ssf.56a crc=0x3919c0e5
+qsound = 0x300000 0x080000 word   ssf.57a crc=0x1ba9bfa6
+qsound = 0x380000 0x080000 word   ssf.58a crc=0x0c89a272
+
+key = 0x000000 0x000014 byte   ssf2xjr1r.key crc=0x82c86e63
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

@@ -680,7 +680,8 @@ pinned hashes that go with them stand unchanged. A CPS-2 board file says
 very little else: `cps1_v.cpp` has exactly one row — `{"cps2", CPS_B_21_DEF,
 mapper_cps2}` — for all 324 CPS-2 sets, so the half of a CPS-2 board file that
 is not ROM lines is a constant, and `tools/mame_to_board.zig` writes the same
-seven lines into every one of them.
+eight lines into every one of them. It writes no `cpu_clock` either: every
+CPS-2 board is a 16 MHz one, which is what `system = cps2` already means.
 
 But asking every user to transcribe thirty lines out of a C++ file before their
 set will run is a wall, and it is a wall nobody else puts up. So a library of
@@ -692,10 +693,13 @@ binary. Three things make that honest:
   research — MAME's `cps1_config_table` in `src/mame/capcom/cps1_v.cpp` — and
   ours says on every line of every file that this is where it came from.
   `tools/mame_to_board.zig` writes them; the output is committed and the tool
-  is run by hand.
-  A board no table covers — CPS-2, whose configuration is the same on every
-  board — is typed out under `boards/hand/`, which the tool lists in the index
-  and otherwise leaves alone.
+  is run by hand. It reads both drivers, because both generations are in that
+  one table: a CPS-1 set has a row of its own, and every CPS-2 set is on the
+  row called `cps2`.
+  A board no table covers at all would be typed out under `boards/hand/`, which
+  the tool lists in the index and otherwise leaves alone. Nothing is, since
+  M13: the CPS-2 board that was hand-written to bring M11 up is now the tool's
+  own output, byte for byte on every line that is not a comment.
 - **It is selected by name, which is what everyone else does.** MAME keys that
   table off the romset's short name — the zip's basename — and so does FBNeo;
   jtcps1 picks by `.mra` file name. Nobody identifies a board by hashing the
@@ -1594,9 +1598,61 @@ mapping for all 324 sets (§8.1) — and `boards/` gains them; `max_gfx` goes fr
 16 MiB to 64 MiB, which is what the largest CPS-2 sets need; `compat` sweeps
 both libraries.
 
-Acceptance: the sweep boots the CPS-2 library the way M5.5's boots the CPS-1
-one, and what does not boot is written down here rather than left to be
-rediscovered.
+The tool reads `cps2.cpp` beside `cps1.cpp` and runs every set in both through
+the same `build`: the ROM map is the set's own, and the row it is on is either
+its own or `cps2`. The rest is three small things — `key` becomes a region name
+the ROM map recognises, `system = cps2` is written where the default is not
+`cps1`, and no `cpu_clock` is written at all for a CPS-2 board, because 16 MHz
+is what `system = cps2` already means.
+
+Acceptance: met. `boards/` ships 516 files, 322 of them CPS-2, and every one
+parses, is under its own name once, and answers `find` — the same three tests
+that gate the CPS-1 library, over both. The generated `ddtod.board` is the
+hand-written one M11 was brought up on, byte for byte on every line that is not
+a comment, so `boards/hand/` is empty and the M11 and M12 results stand
+unchanged. The M10 hashes stand: `zig build test` and `zig build testrom` pass,
+and the `roms/cps1` sweep is what it was — no CPS-1 board file moved.
+
+What the sweep says, on `roms/cps1 roms/cps2` at 1200 frames:
+
+- The six CPS-1 sets are what they were, and `captcomm` is refused for the
+  reason it was before this milestone: that zip is a different dump of the set,
+  and the CRC on the board line says so.
+- Five of the six CPS-2 sets load and run on a board file that ships. All five
+  are suicided boards, so what they do afterwards is not news: `armwar` and
+  `mvsc` draw ciphertext, `msh` and `sfa3` stay blank, `ddtod` halts on the
+  first frame. This is M11's ceiling and no new one — no set in `roms/cps2`
+  carries a key.
+- `avsp` is refused: its `avp.14m` hashes to `ebba093e`, and no set in mame0289
+  names that dump. The library was written against a table, and the table says
+  which bytes it was written for; that is the check working, not a set the
+  library is missing.
+
+Ceilings left behind:
+
+- **Two of MAME's 324 sets get no board file.** `gigaman2` has no `key` region,
+  an 8051 where the sound Z80 goes and an OKI where QSound goes: it is in that
+  driver for what it copies, not for what it is. `ssf2us2` has a dump whose file
+  name has a space in it, which a board file line cannot hold — the same
+  limitation two CPS-1 sets already hit. Both are named in the tool's summary.
+- **41 CPS-2 sets have a `ROM_FILL` of zeros at the bottom of their graphics
+  region, and the board file does not say so.** Those are chips the B-board
+  does not carry, and the loader now reads an unpopulated CPS-2 graphics byte as
+  0 rather than as an erased EPROM's 0xff: a tile fetched out of an empty socket
+  comes back as pen 0, which is the transparent one and the same reading M12
+  gave a code past the end of the region. A fill of anything else, or into any
+  other region, is still a set this tool turns away — one CPS-1 bootleg,
+  `gulunpa`, is.
+- **A shipped board file is a transcription, and 322 more of them are 322 more
+  claims nobody here has checked against a board.** Every CPS-2 file says
+  `Untested` in its header, and none of them can say otherwise until a set with
+  a key is at hand. The `booted` list in the tool is still seven CPS-1 sets.
+- The 64 MiB `max_gfx` is a ceiling on the region a board file may name, not a
+  measurement: the largest set anyone has dumped, `mmatrix`, fills half of it.
+- `boards/` is 2.1 MB of text now, and all of it is embedded, so the binary
+  carries about a megabyte more than it did. Reading the library off disk would
+  buy that back and cost the one property that makes it worth having: that
+  `zicps sf2.zip` needs nothing beside it.
 
 ## 10. Testing Strategy Summary
 

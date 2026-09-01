@@ -1,18 +1,20 @@
-# Board file for MAME's `ddtod`, written by hand.
+# Board file for MAME's `ddtoda`, written by tools/mame_to_board.zig.
 #
-# The first CPS-2 board in the library, and the one M11 was brought up on. It is
-# a hand transcription of MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and the
-# MAME team): src/mame/capcom/cps2.cpp and cps1_v.cpp.
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
 #
-# A CPS-2 board has no battery-backed configuration to hold: every board is the
-# CPS-B-21 at its default strapping, with the same two-bank graphics mapper. The
-# battery holds the decryption key instead, and that is `key` below.
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
 version = 1
 system = cps2
 
-program = 0x000000 0x080000 word   dade.03c crc=0x8e73533d
-program = 0x080000 0x080000 word   dade.04c crc=0x00c2e82e
-program = 0x100000 0x080000 word   dade.05c crc=0xea996008
+program = 0x000000 0x080000 word   dada.03c crc=0xbf243e15
+program = 0x080000 0x080000 word   dada.04c crc=0x76551eec
+program = 0x100000 0x080000 word   dada.05c crc=0x0a0ad827
 program = 0x180000 0x080000 word   dad.06a crc=0x6225495a
 program = 0x200000 0x080000 word   dad.07a crc=0xb3480ec3
 
@@ -31,10 +33,7 @@ audio = 0x010000 0x018000 byte   dad.01 0x8000 crc=0x3f5e2424
 qsound = 0x000000 0x200000 word   dad.11m crc=0x0c499b67
 qsound = 0x200000 0x200000 word   dad.12m crc=0x2f0b5a4e
 
-# The battery's own contents, and the only line here that is this set's rather
-# than the generation's. A set without it is a board whose battery has gone: it
-# still runs, on its own ciphertext, and fails its own checksum.
-key = 0x000000 0x000014 byte   ddtod.key crc=0x41dfca41
+key = 0x000000 0x000014 byte   ddtoda.key crc=0xe5e8d1b8
 
 # --- what a CPS-2 board is strapped to -----------------------------------
 layer_control   = 0x26
@@ -44,7 +43,5 @@ layer_enable    = 0x02 0x04 0x08 0x30 0x30
 id              = 0x32 0xffff
 multiply        = 0x00 0x02 0x04 0x06
 
-# Sprites are addressed linearly by the CPS-2 object hardware and are in no
-# range; the three scroll layers are all in the second bank.
 bank_sizes = 0x20000 0x20000 0x0 0x0
 gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

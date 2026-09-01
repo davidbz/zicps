@@ -1,0 +1,48 @@
+# Board file for MAME's `sgemfh`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   pcfh.03 crc=0xe9103347
+program = 0x080000 0x080000 word   pcf.04 crc=0xf4314c96
+program = 0x100000 0x080000 word   pcf.05 crc=0x215655f6
+program = 0x180000 0x080000 word   pcf.06 crc=0xea6f13ea
+program = 0x200000 0x080000 word   pcf.07 crc=0x5ac6d5ea
+
+gfx = 0x000000 0x400000 word64 pcf.13m crc=0x22d72ab9
+gfx = 0x000002 0x400000 word64 pcf.15m crc=0x16a4813c
+gfx = 0x000004 0x400000 word64 pcf.17m crc=0x1097e035
+gfx = 0x000006 0x400000 word64 pcf.19m crc=0xd362d874
+gfx = 0x1000000 0x100000 word64 pcf.14m crc=0x0383897c
+gfx = 0x1000002 0x100000 word64 pcf.16m crc=0x76f91084
+gfx = 0x1000004 0x100000 word64 pcf.18m crc=0x756c3754
+gfx = 0x1000006 0x100000 word64 pcf.20m crc=0x9ec9277d
+
+audio = 0x000000 0x008000 byte   pcf.01 crc=0x254e5f33
+audio = 0x010000 0x018000 byte   pcf.01 0x8000 crc=0x254e5f33
+audio = 0x028000 0x020000 byte   pcf.02 crc=0x6902f4f9
+
+qsound = 0x000000 0x400000 word   pcf.11m crc=0xa5dea005
+qsound = 0x400000 0x400000 word   pcf.12m crc=0x4ce235fe
+
+key = 0x000000 0x000014 byte   sgemfh.key crc=0xf97f4b7d
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

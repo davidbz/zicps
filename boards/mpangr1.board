@@ -1,0 +1,44 @@
+# Board file for MAME's `mpangr1`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   mpne.03b crc=0x6ef0f9b2
+program = 0x080000 0x080000 word   mpne.04b crc=0x30a468bb
+
+gfx = 0x000000 0x200000 byte64 mpn-simm.01c crc=0x388db66b
+gfx = 0x000001 0x200000 byte64 mpn-simm.01d crc=0xaff1b494
+gfx = 0x000002 0x200000 byte64 mpn-simm.01a crc=0xa9c4857b
+gfx = 0x000003 0x200000 byte64 mpn-simm.01b crc=0xf759df22
+gfx = 0x000004 0x200000 byte64 mpn-simm.03c crc=0xdec6b720
+gfx = 0x000005 0x200000 byte64 mpn-simm.03d crc=0xf8774c18
+gfx = 0x000006 0x200000 byte64 mpn-simm.03a crc=0xc2aea4ec
+gfx = 0x000007 0x200000 byte64 mpn-simm.03b crc=0x84d6dc33
+
+audio = 0x000000 0x008000 byte   mpn.01 crc=0x90c7adb6
+audio = 0x010000 0x018000 byte   mpn.01 0x8000 crc=0x90c7adb6
+
+qsound = 0x000000 0x200000 word   mpn-simm.05a crc=0x318a2e21
+qsound = 0x200000 0x200000 word   mpn-simm.05b crc=0x5462f4e8
+
+key = 0x000000 0x000014 byte   mpang.key crc=0x95354b0f
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

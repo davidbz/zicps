@@ -1,0 +1,59 @@
+# Board file for MAME's `mmancp2ur1`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   rcmu.03a crc=0xc6b75320
+program = 0x080000 0x080000 word   rcmu.04a crc=0x47880111
+program = 0x100000 0x080000 word   rcmu.05a crc=0x4376ea95
+
+gfx = 0x800000 0x080000 word64 rcm.73 crc=0x774c6e04
+gfx = 0x800002 0x080000 word64 rcm.63 crc=0xacad7c62
+gfx = 0x800004 0x080000 word64 rcm.83 crc=0x6af30499
+gfx = 0x800006 0x080000 word64 rcm.93 crc=0x7a5a5166
+gfx = 0xa00000 0x080000 word64 rcm.74 crc=0x004ec725
+gfx = 0xa00002 0x080000 word64 rcm.64 crc=0x65c0464e
+gfx = 0xa00004 0x080000 word64 rcm.84 crc=0xfb3097cc
+gfx = 0xa00006 0x080000 word64 rcm.94 crc=0x2e16557a
+gfx = 0xc00000 0x080000 word64 rcm.75 crc=0x70a73f99
+gfx = 0xc00002 0x080000 word64 rcm.65 crc=0xecedad3d
+gfx = 0xc00004 0x080000 word64 rcm.85 crc=0x3d6186d8
+gfx = 0xc00006 0x080000 word64 rcm.95 crc=0x8c7700f1
+gfx = 0xe00000 0x080000 word64 rcm.76 crc=0x89a889ad
+gfx = 0xe00002 0x080000 word64 rcm.66 crc=0x1300eb7b
+gfx = 0xe00004 0x080000 word64 rcm.86 crc=0x6d974ebd
+gfx = 0xe00006 0x080000 word64 rcm.96 crc=0x7da4cd24
+
+audio = 0x000000 0x008000 byte   rcm.01 crc=0xd60cf8a3
+audio = 0x010000 0x018000 byte   rcm.01 0x8000 crc=0xd60cf8a3
+
+qsound = 0x000000 0x080000 word   rcm.51 crc=0xb6d07080
+qsound = 0x080000 0x080000 word   rcm.52 crc=0xdfddc493
+qsound = 0x100000 0x080000 word   rcm.53 crc=0x6062ae3a
+qsound = 0x180000 0x080000 word   rcm.54 crc=0x08c6f3bf
+qsound = 0x200000 0x080000 word   rcm.55 crc=0xf97dfccc
+qsound = 0x280000 0x080000 word   rcm.56 crc=0xade475bc
+qsound = 0x300000 0x080000 word   rcm.57 crc=0x075effb3
+qsound = 0x380000 0x080000 word   rcm.58 crc=0xf6c1f87b
+
+key = 0x000000 0x000014 byte   mmancp2u.key crc=0x17ca6659
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

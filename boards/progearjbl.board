@@ -1,0 +1,40 @@
+# Board file for MAME's `progearjbl`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   pgaj_bl.03 crc=0x4fef676c
+program = 0x080000 0x080000 word   pgaj_bl.04 crc=0xa069bd3b
+
+gfx = 0x000000 0x400000 word64 pga.13m crc=0x5194c198
+gfx = 0x000002 0x400000 word64 pga.15m crc=0xb794e83f
+gfx = 0x000004 0x400000 word64 pga.17m crc=0x87f22918
+gfx = 0x000006 0x400000 word64 pga.19m crc=0x65ffb45b
+
+audio = 0x000000 0x008000 byte   pga.01 crc=0xbdbfa992
+audio = 0x010000 0x018000 byte   pga.01 0x8000 crc=0xbdbfa992
+
+qsound = 0x000000 0x400000 word   pga.11m crc=0xabdd224e
+qsound = 0x400000 0x400000 word   pga.12m crc=0xdac53406
+
+key = 0x000000 0x000014 byte   phoenix.key crc=0x2cf772b0
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

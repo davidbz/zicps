@@ -1,0 +1,43 @@
+# Board file for MAME's `jyangoku`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   majj.03 crc=0x4614a3b2
+
+gfx = 0x000000 0x200000 byte64 maj1_d.simm1 crc=0xba0fe27b
+gfx = 0x000001 0x200000 byte64 maj1_c.simm1 crc=0x2cd141bf
+gfx = 0x000002 0x200000 byte64 maj1_b.simm1 crc=0xe29e4c26
+gfx = 0x000003 0x200000 byte64 maj1_a.simm1 crc=0x7f68b88a
+gfx = 0x000004 0x200000 byte64 maj3_d.simm3 crc=0x3aaeb90b
+gfx = 0x000005 0x200000 byte64 maj3_c.simm3 crc=0x97894cea
+gfx = 0x000006 0x200000 byte64 maj3_b.simm3 crc=0xec737d9d
+gfx = 0x000007 0x200000 byte64 maj3_a.simm3 crc=0xc23b6f22
+
+audio = 0x000000 0x008000 byte   maj.01 crc=0x1fe8c213
+audio = 0x010000 0x018000 byte   maj.01 0x8000 crc=0x1fe8c213
+
+qsound = 0x000000 0x200000 byte16 maj5_a.simm5 crc=0x5ad9ee53
+qsound = 0x000001 0x200000 byte16 maj5_b.simm5 crc=0xefb3dbfb
+
+key = 0x000000 0x000014 byte   jyangoku.key crc=0x95b0a560
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

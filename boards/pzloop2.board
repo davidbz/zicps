@@ -1,0 +1,46 @@
+# Board file for MAME's `pzloop2`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   pl2e.03 crc=0x3b1285b2
+program = 0x080000 0x080000 word   pl2e.04 crc=0x40a2d647
+program = 0x100000 0x080000 word   pl2e.05 crc=0x0f11d818
+program = 0x180000 0x080000 word   pl2e.06 crc=0x86fbbdf4
+
+gfx = 0x000000 0x200000 byte64 pl2-simm.01c crc=0x137b13a7
+gfx = 0x000001 0x200000 byte64 pl2-simm.01d crc=0xa2db1507
+gfx = 0x000002 0x200000 byte64 pl2-simm.01a crc=0x7e80ff8e
+gfx = 0x000003 0x200000 byte64 pl2-simm.01b crc=0xcd93e6ed
+gfx = 0x000004 0x200000 byte64 pl2-simm.03c crc=0x0f52bbca
+gfx = 0x000005 0x200000 byte64 pl2-simm.03d crc=0xa62712c3
+gfx = 0x000006 0x200000 byte64 pl2-simm.03a crc=0xb60c9f8e
+gfx = 0x000007 0x200000 byte64 pl2-simm.03b crc=0x83fef284
+
+audio = 0x000000 0x008000 byte   pl2.01 crc=0x35697569
+audio = 0x010000 0x018000 byte   pl2.01 0x8000 crc=0x35697569
+
+qsound = 0x000000 0x200000 word   pl2-simm.05a crc=0x85d8fbe8
+qsound = 0x200000 0x200000 word   pl2-simm.05b crc=0x1ed62584
+
+key = 0x000000 0x000014 byte   pzloop2.key crc=0xae13be78
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

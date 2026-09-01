@@ -1,0 +1,65 @@
+# Board file for MAME's `19xxj`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   19xj-03b.6a crc=0xbcad93dd
+program = 0x080000 0x080000 word   19xj-04b.7a crc=0x931882a1
+program = 0x100000 0x080000 word   19xj-05b.8a crc=0xe7eeddc4
+program = 0x180000 0x080000 word   19xj-06b.9a crc=0xf27cd6b8
+program = 0x200000 0x080000 word   19xj-07.6d crc=0x61c0296c
+
+gfx = 0x000000 0x080000 word64 19x-69.4j crc=0x427aeb18
+gfx = 0x000002 0x080000 word64 19x-59.4d crc=0x63bdbf54
+gfx = 0x000004 0x080000 word64 19x-79.4m crc=0x2dfe18b5
+gfx = 0x000006 0x080000 word64 19x-89.4p crc=0xcbef9579
+gfx = 0x800000 0x080000 word64 19x-73.8j crc=0x8e81f595
+gfx = 0xa00000 0x080000 word64 19x-74.9j crc=0x6d7ad22e
+gfx = 0xc00000 0x080000 word64 19x-75.10j crc=0xcb1a1b6a
+gfx = 0xe00000 0x080000 word64 19x-76.11j crc=0x26fc2b08
+gfx = 0x800002 0x080000 word64 19x-63.8d crc=0x6f8b045e
+gfx = 0xa00002 0x080000 word64 19x-64.9d crc=0xccd5725a
+gfx = 0xc00002 0x080000 word64 19x-65.10d crc=0x6cf6db35
+gfx = 0xe00002 0x080000 word64 19x-66.11d crc=0x16115dd3
+gfx = 0x800004 0x080000 word64 19x-83.8m crc=0xc11f88c1
+gfx = 0xa00004 0x080000 word64 19x-84.9m crc=0x68cc9cd8
+gfx = 0xc00004 0x080000 word64 19x-85.10m crc=0xf213666b
+gfx = 0xe00004 0x080000 word64 19x-86.11m crc=0x574e0473
+gfx = 0x800006 0x080000 word64 19x-93.8p crc=0x9fad3c55
+gfx = 0xa00006 0x080000 word64 19x-94.9p crc=0xe10e252c
+gfx = 0xc00006 0x080000 word64 19x-95.10p crc=0x2b86fa67
+gfx = 0xe00006 0x080000 word64 19x-96.11p crc=0xae6eb692
+
+audio = 0x000000 0x008000 byte   19x-01.1a crc=0xef55195e
+audio = 0x010000 0x018000 byte   19x-01.1a 0x8000 crc=0xef55195e
+
+qsound = 0x000000 0x080000 word   19x-51.6a crc=0xe9cd7780
+qsound = 0x080000 0x080000 word   19x-52.7a crc=0xb27b91a8
+qsound = 0x100000 0x080000 word   19x-53.8a crc=0x2e563ee2
+qsound = 0x180000 0x080000 word   19x-54.9a crc=0xf47c1f24
+qsound = 0x200000 0x080000 word   19x-55.10a crc=0x0b1af6e0
+qsound = 0x280000 0x080000 word   19x-56.11a crc=0xdfa8819f
+qsound = 0x300000 0x080000 word   19x-57.12a crc=0x229ba777
+qsound = 0x380000 0x080000 word   19x-58.13a crc=0xc7dceba4
+
+key = 0x000000 0x000014 byte   19xxj.key crc=0x9aafa71a
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

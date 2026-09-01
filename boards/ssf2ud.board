@@ -1,0 +1,53 @@
+# Board file for MAME's `ssf2ud`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   ssfud.03a crc=0xfad5daf8
+program = 0x080000 0x080000 word   ssfud.04a crc=0x0d31af65
+program = 0x100000 0x080000 word   ssfud.05 crc=0x75c651ef
+program = 0x180000 0x080000 word   ssfud.06 crc=0x85c3ec00
+program = 0x200000 0x080000 word   ssfud.07 crc=0x247e2504
+
+gfx = 0x000000 0x200000 word64 ssf.13m crc=0xcf94d275
+gfx = 0x000002 0x200000 word64 ssf.15m crc=0x5eb703af
+gfx = 0x000004 0x200000 word64 ssf.17m crc=0xffa60e0f
+gfx = 0x000006 0x200000 word64 ssf.19m crc=0x34e825c5
+gfx = 0x800000 0x100000 word64 ssf.14m crc=0xb7cc32e7
+gfx = 0x800002 0x100000 word64 ssf.16m crc=0x8376ad18
+gfx = 0x800004 0x100000 word64 ssf.18m crc=0xf5b1b336
+gfx = 0x800006 0x100000 word64 ssf.20m crc=0x459d5c6b
+
+audio = 0x000000 0x008000 byte   ssf.01 crc=0xeb247e8c
+audio = 0x010000 0x018000 byte   ssf.01 0x8000 crc=0xeb247e8c
+
+qsound = 0x000000 0x080000 byte   ssf.q01 crc=0xa6f9da5c
+qsound = 0x080000 0x080000 byte   ssf.q02 crc=0x8c66ae26
+qsound = 0x100000 0x080000 byte   ssf.q03 crc=0x695cc2ca
+qsound = 0x180000 0x080000 byte   ssf.q04 crc=0x9d9ebe32
+qsound = 0x200000 0x080000 byte   ssf.q05 crc=0x4770e7b7
+qsound = 0x280000 0x080000 byte   ssf.q06 crc=0x4e79c951
+qsound = 0x300000 0x080000 byte   ssf.q07 crc=0xcdd14313
+qsound = 0x380000 0x080000 byte   ssf.q08 crc=0x6f5a088c
+
+key = 0x000000 0x000014 byte   phoenix.key crc=0x2cf772b0
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

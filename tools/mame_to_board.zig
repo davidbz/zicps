@@ -1,12 +1,13 @@
-//! MAME's CPS-1 tables, turned into the board files under `boards/`
+//! MAME's Capcom tables, turned into the board files under `boards/`
 //!.
 //!
 //! The battery on a B-board holds numbers that are on no chip and in no dump,
 //! so everyone who emulates this hardware is reading the same transcription:
 //! MAME's `cps1_config_table`, keyed by the romset name the zip is already
 //! called. This reads that table, the PAL-derived bank mappers beside it and
-//! the ROM map of every `ROM_START` in the driver, and writes one board file
-//! per set.
+//! the ROM map of every `ROM_START` in both drivers, and writes one board file
+//! per set. A CPS-1 set has a row of its own in that table; every CPS-2 set is
+//! on the row called `cps2`, because every CPS-2 board is the same board.
 //!
 //! It is run by hand — `zig build boards -- <mame source dir>` — and its
 //! output is committed. Nothing here runs during an ordinary build.
@@ -43,10 +44,13 @@ pub fn main(init: std.process.Init) !void {
     defer src_dir.close(io);
 
     // `cps1_v.cpp` holds what the battery held; `cps1.cpp` holds which files a
-    // set is made of and which decryption key its sound board wants.
+    // set is made of and which decryption key its sound board wants. `cps2.cpp`
+    // holds only the files: the row its 324 sets share is in `cps1_v.cpp` with
+    // the rest of them.
     const video_src = try slurp(arena, io, src_dir, "cps1_v.cpp");
     const driver_src = try slurp(arena, io, src_dir, "cps1.cpp");
     const kabuki_src = try slurp(arena, io, src_dir, "kabuki.cpp");
+    const cps2_src = try slurp(arena, io, src_dir, "cps2.cpp");
 
     var m = Mame{ .arena = arena };
     try m.readTables(video_src);
@@ -58,21 +62,26 @@ pub fn main(init: std.process.Init) !void {
 
     var written: std.ArrayList([]const u8) = .empty;
     var skipped: std.ArrayList([]const u8) = .empty;
-    var sets = std.mem.splitSequence(u8, driver_src, "ROM_START(");
-    _ = sets.next(); // everything before the first set
-    while (sets.next()) |rest| {
-        const name = std.mem.trim(u8, rest[0 .. std.mem.indexOfScalar(u8, rest, ')') orelse continue], " \t");
-        const end = std.mem.indexOf(u8, rest, "ROM_END") orelse continue;
-        const text = m.build(name, rest[0..end]) catch |err| switch (err) {
-            error.Unsupported => {
-                try skipped.append(arena, try std.fmt.allocPrint(arena, "{s}: {s}", .{ name, m.why }));
-                continue;
-            },
-            else => return err,
-        };
-        const file = try std.fmt.allocPrint(arena, "{s}.board", .{name});
-        try out_dir.writeFile(io, .{ .sub_path = file, .data = text });
-        try written.append(arena, name);
+    // Two drivers, one library. A CPS-1 set has a row of its own in the config
+    // table; every CPS-2 set shares the one row named `cps2`, which is what
+    // makes its half of a board file the same eight lines every time.
+    for ([_]struct { board.System, []const u8 }{ .{ .cps1, driver_src }, .{ .cps2, cps2_src } }) |driver| {
+        var sets = std.mem.splitSequence(u8, driver[1], "ROM_START(");
+        _ = sets.next(); // everything before the first set
+        while (sets.next()) |rest| {
+            const name = std.mem.trim(u8, rest[0 .. std.mem.indexOfScalar(u8, rest, ')') orelse continue], " \t");
+            const end = std.mem.indexOf(u8, rest, "ROM_END") orelse continue;
+            const text = m.build(name, rest[0..end], driver[0]) catch |err| switch (err) {
+                error.Unsupported => {
+                    try skipped.append(arena, try std.fmt.allocPrint(arena, "{s}: {s}", .{ name, m.why }));
+                    continue;
+                },
+                else => return err,
+            };
+            const file = try std.fmt.allocPrint(arena, "{s}.board", .{name});
+            try out_dir.writeFile(io, .{ .sub_path = file, .data = text });
+            try written.append(arena, name);
+        }
     }
 
     try sweep(io, out_dir, written.items);
@@ -102,8 +111,9 @@ fn sweep(io: std.Io, dir: std.Io.Dir, written: []const []const u8) !void {
 }
 
 /// The boards in `hand/`, which this tool neither writes nor sweeps. MAME's
-/// CPS-1 tables are what it reads, so a generation it cannot read is typed out
-/// by a person; they still belong in the one list, so they are named here.
+/// tables are what it reads, so a board no table covers is typed out by a
+/// person; they still belong in the one list, so they are named here. Nothing
+/// is under there today: both generations are in the tables.
 /// Sorted, because a directory hands them over in whatever order it likes and
 /// this file is committed and diffed.
 fn handWritten(arena: std.mem.Allocator, io: std.Io, out_dir: std.Io.Dir) ![]const []const u8 {
@@ -506,21 +516,32 @@ const Mame = struct {
 
     /// One set's board file, or `error.Unsupported` with `why` set. Whatever
     /// comes back has already been through `board.parse`.
-    fn build(m: *Mame, name: []const u8, block: []const u8) ![]const u8 {
-        const config = m.configs.get(name) orelse
-            return m.give("no row in MAME's cps1_config_table", .{});
+    fn build(m: *Mame, name: []const u8, block: []const u8, system: board.System) ![]const u8 {
+        const config = switch (system) {
+            .cps1 => m.configs.get(name) orelse
+                return m.give("no row in MAME's cps1_config_table", .{}),
+            // The one row all 324 of them are on, and the reason a CPS-2 board
+            // file says nothing about itself that its neighbour does not.
+            .cps2 => m.configs.get("cps2") orelse
+                return m.give("no `cps2` row in MAME's cps1_config_table", .{}),
+        };
         // The kludges are sprite layouts and RAM in the wrong place, bent
         // around bootlegs one at a time. A board file cannot say any of it.
         if (config.kludge != 0)
             return m.give("MAME needs bootleg kludge 0x{x} for this set", .{config.kludge});
-        const cpu_hz = m.clocks.get(name) orelse
-            return m.give("no GAME row names a machine config, so nothing says which 68000 this board has", .{});
+        const cpu_hz: ?u32 = switch (system) {
+            .cps1 => m.clocks.get(name) orelse
+                return m.give("no GAME row names a machine config, so nothing says which 68000 this board has", .{}),
+            // Every CPS-2 board is a 16 MHz one, which is what `system = cps2`
+            // already means: a line saying it again is a line to keep in step.
+            .cps2 => null,
+        };
 
         var aw: std.Io.Writer.Allocating = .init(m.arena);
         const w = &aw.writer;
-        try head(w, name, cpu_hz);
-        try m.map(w, block);
-        try registers(w, config);
+        try head(w, name, system, cpu_hz);
+        try m.map(w, block, system);
+        try registers(w, config, system);
         if (m.keys.get(name)) |key|
             try w.print("\nkabuki = 0x{x:0>8} 0x{x:0>8} 0x{x:0>4} 0x{x:0>2}\n", .{ key.swap1, key.swap2, key.addr, key.xor });
 
@@ -528,20 +549,45 @@ const Mame = struct {
         var diag = board.Diag{};
         const b = board.parse(text, &diag) catch
             return m.give("the board file this makes is not one this build reads: {s}", .{diag.message()});
+        // A CPS-2 board without the twenty bytes its battery holds is not one:
+        // `gigaman2` is in this driver because of what it copies, not what it
+        // is, and it has an MCU and an OKI where the key and QSound should be.
+        if (system == .cps2) {
+            for (b.romList()) |rom| {
+                if (rom.region == .key) break;
+            } else return m.give("MAME gives this set no key ROM, so whatever it is wired as, it is not a CPS-2 board", .{});
+        }
         try m.fits(&b);
         return text;
     }
 
-    fn head(w: *std.Io.Writer, name: []const u8, cpu_hz: u32) !void {
+    fn head(w: *std.Io.Writer, name: []const u8, system: board.System, cpu_hz: ?u32) !void {
         try w.print(
             \\# Board file for MAME's `{s}`, written by tools/mame_to_board.zig.
             \\#
+            \\
+        , .{name});
+        const provenance: []const u8 = switch (system) {
+            .cps1 =>
             \\# The register mapping, the bank table and the Kabuki key are what a
             \\# working board keeps in the RAM its battery holds up,
             \\# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
             \\# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
             \\
-        , .{name});
+            ,
+            // Two files for the same reason MAME needs two: the ROM map is the
+            // set's own, and the register mapping is the generation's.
+            .cps2 =>
+            \\# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+            \\# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+            \\# cps1_v.cpp for the one row every CPS-2 board shares.
+            \\# A CPS-2 board has no battery-backed configuration to hold: it is the
+            \\# CPS-B-21 at its default strapping, and what its battery holds is the
+            \\# decryption key, which is `key` below.
+            \\
+            ,
+        };
+        try w.writeAll(provenance);
         for (booted) |set| {
             if (std.mem.eql(u8, set, name)) break;
         } else try w.writeAll(
@@ -551,14 +597,16 @@ const Mame = struct {
             \\
         );
         try w.print("version = {d}\n", .{board.version});
+        // `cps1` is the default, so only the other one is worth a line.
+        if (system != .cps1) try w.print("system = {s}\n", .{@tagName(system)});
         // Soldered, not battery-backed, and the one number here that comes out
         // of the machine config rather than the tables.
-        try w.print("cpu_clock = {d}\n", .{cpu_hz});
+        if (cpu_hz) |hz| try w.print("cpu_clock = {d}\n", .{hz});
     }
 
     /// The ROM map, region by region, in the order the chips are listed on the
     /// board rather than the order MAME happens to load them.
-    fn map(m: *Mame, w: *std.Io.Writer, block: []const u8) !void {
+    fn map(m: *Mame, w: *std.Io.Writer, block: []const u8, system: board.System) !void {
         var loads: std.ArrayList(Load) = .empty;
         var region: ?board.Region = null;
         // What this build cannot express, remembered per region rather than
@@ -604,6 +652,17 @@ const Mame = struct {
                 // The rest of a chip that is not loaded at all: a board file
                 // says where each piece comes from, so a piece nobody reads is
                 // a line nobody writes.
+                continue;
+            }
+
+            if (std.mem.eql(u8, macro, "ROM_FILL")) {
+                // The bottom of a CPS-2 graphics region a set leaves
+                // unpopulated. It is not a chip and there is nothing to name:
+                // the loader already reads an unpopulated CPS-2 graphics byte
+                // as the zero MAME writes here. A fill of anything else, or
+                // anywhere else, is one this build cannot express.
+                if (system == .cps2 and into == .gfx and try number(args[2]) == 0) continue;
+                beyond[@intFromEnum(into)] = try std.fmt.allocPrint(m.arena, "a ROM_FILL of {s} this build cannot express", .{args[2]});
                 continue;
             }
 
@@ -767,6 +826,9 @@ fn regionOf(tag: []const u8) ?board.Region {
     if (std.mem.eql(u8, tag, "audiocpu")) return .audio;
     if (std.mem.eql(u8, tag, "qsound")) return .qsound;
     if (std.mem.eql(u8, tag, "oki")) return .oki;
+    // Not a chip: the twenty bytes a CPS-2 board's battery holds up, which MAME
+    // carries as a region because a dump of one is a file like any other.
+    if (std.mem.eql(u8, tag, "key")) return .key;
     return null;
 }
 
@@ -795,9 +857,15 @@ fn crcOf(hashes: []const u8) ?u32 {
     return std.fmt.parseInt(u32, trim(text), 16) catch null;
 }
 
-fn registers(w: *std.Io.Writer, config: Config) !void {
+fn registers(w: *std.Io.Writer, config: Config, system: board.System) !void {
     const cpsb = config.cpsb;
-    try w.writeAll("\n# --- what the battery held -----------------------------------------------\n");
+    try w.writeAll(switch (system) {
+        .cps1 => "\n# --- what the battery held -----------------------------------------------\n",
+        // The same numbers on every CPS-2 board, and none of them the board's
+        // own: sprites are addressed linearly by the object hardware and are in
+        // no range, and the three scroll layers are all in the second bank.
+        .cps2 => "\n# --- what a CPS-2 board is strapped to -----------------------------------\n",
+    });
     try w.writeAll("layer_control   = ");
     try reg(w, cpsb.layer_control);
     try w.writeAll("\npriority        =");

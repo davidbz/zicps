@@ -1,0 +1,51 @@
+# Board file for MAME's `mshvsfb`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key, which is `key` below.
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   mvsb.03g crc=0x143895ef
+program = 0x080000 0x080000 word   mvsb.04g crc=0xdd8a886c
+program = 0x100000 0x080000 word   mvs.05d crc=0x921fc542
+program = 0x180000 0x080000 word   mvs.06a crc=0x959f3030
+program = 0x200000 0x080000 word   mvs.07b crc=0x7f915bdb
+program = 0x280000 0x080000 word   mvs.08a crc=0xc2813884
+program = 0x300000 0x080000 word   mvs.09b crc=0x3ba08818
+program = 0x380000 0x080000 word   mvs.10b crc=0xcf0dba98
+
+gfx = 0x000000 0x400000 word64 mvs.13m crc=0x29b05fd9
+gfx = 0x000002 0x400000 word64 mvs.15m crc=0xfaddccf1
+gfx = 0x000004 0x400000 word64 mvs.17m crc=0x97aaf4c7
+gfx = 0x000006 0x400000 word64 mvs.19m crc=0xcb70e915
+gfx = 0x1000000 0x400000 word64 mvs.14m crc=0xb3b1972d
+gfx = 0x1000002 0x400000 word64 mvs.16m crc=0x08aadb5d
+gfx = 0x1000004 0x400000 word64 mvs.18m crc=0xc1228b35
+gfx = 0x1000006 0x400000 word64 mvs.20m crc=0x366cc6c2
+
+audio = 0x000000 0x008000 byte   mvs.01 crc=0x68252324
+audio = 0x010000 0x018000 byte   mvs.01 0x8000 crc=0x68252324
+audio = 0x028000 0x020000 byte   mvs.02 crc=0xb34e773d
+
+qsound = 0x000000 0x400000 word   mvs.11m crc=0x86219770
+qsound = 0x400000 0x400000 word   mvs.12m crc=0xf2fd7f68
+
+key = 0x000000 0x000014 byte   mshvsfb.key crc=0x3f5bb6e4
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

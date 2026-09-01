@@ -12,19 +12,24 @@ run anything.
 ## What it can do
 
 - Runs CPS-1 and CPS-1.5 sets, from a zip or a directory of chip images, with
-  accurate video and QSound audio.
-- Ships a board file for nearly every set MAME lists, so `zicps sf2.zip` just
-  runs with nothing to configure.
+  accurate video and sound — QSound, or the older YM2151 + OKI M6295 board.
+- Ships a board file for nearly every set MAME lists, CPS-1 and CPS-2 both, so
+  `zicps sf2.zip` just runs with nothing to configure.
 - Keeps the board's own settings in a file beside your set, so what you set in
   its service menu is still there next time.
 - Drag-and-drop and menu-based loading, pause, fast-forward, frame advance,
   screenshots, fullscreen, CRT-style scanline overlay.
 - Rebindable keys for two players, on a 3- or 6-button panel.
+- Save states, in nine slots plus a quicksave.
 - Deterministic enough to record a run and replay it frame for frame, and to
   render with no window at all and hash the result.
 
-A few things aren't supported: CPS-1 boards with the older YM2151 + ADPCM sound
-hardware (those sets run silent), CP System II, save states, netplay and cheats.
+A few things aren't supported: netplay and cheats. CP System II is nearly all
+there — a CPS-2 set loads, decrypts and draws, and a board file ships for it —
+but the twenty-byte decryption key is part of your set, not part of the board
+file. A set without its `.key` file is a suicided board: it runs its own
+ciphertext, exactly as the hardware does with a flat battery. No such set is on
+hand here, so no CPS-2 game has been watched all the way to its title screen.
 
 ## The board file
 
@@ -91,6 +96,9 @@ window or pick one from the menu.
 | P | Pause |
 | Space | Scanlines |
 | F5 | Reset |
+| F2 / F4 | Save / load state, in the selected slot |
+| F3 | Next slot |
+| F6 / F7 | Quicksave / quickload |
 | F8 | Advance one frame (and pause) |
 | F11 | Fullscreen |
 | F12 | Screenshot |

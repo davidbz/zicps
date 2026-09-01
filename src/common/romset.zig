@@ -20,7 +20,11 @@ pub const Error = error{ BadRomSet, OutOfMemory };
 /// from outside, so every size that reaches an allocator is checked against
 /// what the hardware could physically hold.
 pub const max_program = 4 << 20;
-pub const max_gfx = 16 << 20;
+/// Sixteen megabytes covered every CPS-1 set. A CPS-2 B-board carries four
+/// times what one of those did — `mmatrix` fills 0x2000000 — and the region is
+/// rounded up to a whole shuffle bank before it is allocated, so the ceiling is
+/// the next size up from the largest set anyone has dumped.
+pub const max_gfx = 64 << 20;
 pub const max_audio = 512 << 10;
 pub const max_qsound = 8 << 20;
 /// Every set in MAME's CPS-1 driver fills the M6295's two banks and no more.
@@ -108,6 +112,12 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
 
     const packed_gfx = try alloc(gpa, sizes.get(.gfx));
     defer gpa.free(packed_gfx);
+    // A CPS-2 set that does not fill its graphics address space leaves the
+    // bottom of it unpopulated, and MAME writes zeros there. A tile fetched out
+    // of an empty socket then comes back as pen 0, the transparent one, which
+    // is the same reading M12 gave a code past the end of the region; an erased
+    // EPROM's 0xff would come back as the opaque pen 15, which is a picture.
+    if (b.system == .cps2) @memset(packed_gfx, 0);
 
     try fill(gpa, &src, b, std.EnumArray(board.Region, []u8).init(.{
         .program = program,
@@ -534,6 +544,31 @@ test "a directory of chip images loads into four regions" {
     // Unpopulated regions still exist, and read as erased ROM.
     try testing.expectEqual(@as(usize, 0), set.audio.len);
     try testing.expectEqual(@as(usize, 0), set.qsound.len);
+}
+
+test "a CPS-2 socket nobody filled decodes to the transparent pen" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeTinySet(tmp.dir);
+
+    // The same four graphics chips on a CPS-2 board: 0x20 bytes of a region
+    // that is a whole 0x200000 shuffle bank, and no chip in the rest of it.
+    var text: [tiny_board.len + 16]u8 = undefined;
+    var diag = board.Diag{};
+    const b = try board.parse(try std.fmt.bufPrint(&text, "{s}\nsystem = cps2\n", .{tiny_board}), &diag);
+    var set = load(testing.allocator, testing.io, tmp.parent_dir, &tmp.sub_path, &b, &diag) catch {
+        std.debug.print("unexpected: {s}\n", .{diag.message()});
+        return error.TestUnexpectedResult;
+    };
+    defer set.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, shuffle_bank * pixels_per_byte), set.gfx.len);
+    // The unshuffle moves the four chips' bits around the bank but makes none,
+    // so at most their 64 bits can be lit. An erased EPROM's 0xff would light
+    // every pixel in four megabytes: a picture where there is no chip.
+    var lit: usize = 0;
+    for (set.gfx) |pixel| lit += @intFromBool(pixel != 0);
+    try testing.expect(lit > 0 and lit <= 8 * 8);
 }
 
 test "a set that does not add up is refused by name" {
