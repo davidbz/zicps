@@ -163,7 +163,7 @@ fn parseArgs(args: *std.process.Args.Iterator) Options {
 /// start. The menu says the same thing with less room, so it says less.
 fn explainBoard() void {
     std.debug.print(
-        \\A CPS-1.5 board keeps its configuration in battery-backed RAM, so zicps needs
+        \\A CPS board keeps its configuration in battery-backed RAM, so zicps needs
         \\a board file describing this board before it can run the set. One ships for every
         \\set MAME names, under boards/, and is found by the set's own name; a file beside
         \\the set or --board wins over it.
@@ -445,7 +445,7 @@ fn programSum(program: []const u8) u16 {
     return sum;
 }
 
-/// One region's row on the card. A CPS-1.5 always has all four, but a board
+/// One region's row on the card. A whole board always has all four, but a board
 /// file can describe a set that is missing one, and a row saying so is how
 /// that shows up rather than a crash.
 fn romRow(ui: *shell.Ui, name: []const u8, count: usize, bytes: usize) void {
@@ -458,7 +458,14 @@ fn romRow(ui: *shell.Ui, name: []const u8, count: usize, bytes: usize) void {
 /// Built when the set goes in, because none of it changes while the game plays.
 fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8, key: emu.KeySource) void {
     shell.cardStart(ui, std.fs.path.basename(set), m.from());
+    romRows(ui, m);
+    keyRow(ui, m, key);
+    chipRow(ui, m);
+    shell.cardRow(ui, "SUM", .plain, "{x:0>4}", .{programSum(m.rom.program)});
+}
 
+/// A row per region, counted off the board file's own ROM list.
+fn romRows(ui: *shell.Ui, m: *const Machine) void {
     var regions = std.EnumArray(board.Region, usize).initFill(0);
     for (m.b.romList()) |rom| regions.getPtr(rom.region).* += 1;
 
@@ -467,33 +474,43 @@ fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8, key: emu.Key
     romRow(ui, "SOUND", regions.get(.audio), m.rom.audio.len);
     // The samples say which sound board this is, so the row names it: a QSound
     // set has a DL-1425 sample ROM and a plain CPS-1 one has the M6295's.
-    const plain = m.b.sound() == .cps1;
-    if (plain)
+    if (m.b.sound() == .cps1)
         romRow(ui, "ADPCM", regions.get(.oki), m.rom.oki.len)
     else
         romRow(ui, "SAMPLES", regions.get(.qsound), m.rom.qsound.len);
-    // The Kabuki key is the one thing in the board file that is a secret
-    // rather than a setting: without it the Z80 runs garbage and the cabinet
-    // is silent, so whether there is one is worth a line of its own. Only a
-    // QSound board has one to be missing.
-    if (!plain and m.b.system == .cps1) shell.cardRow(ui, "KABUKI", if (m.b.kabuki == null) .bad else .good, "{s}", .{
-        if (m.b.kabuki == null) "NO KEY" else "KEY SET",
-    });
+}
+
+/// Whichever of the two generations' keys this board has, and no row at all on
+/// a board that has neither.
+fn keyRow(ui: *shell.Ui, m: *const Machine, key: emu.KeySource) void {
     // A CPS-2 board's key belongs to the set; a board whose battery went flat
     // carries none, and then the board file's transcription of what that
     // battery held runs it. With neither it still runs — on its own ciphertext,
     // into a self-test that fails — so this is a line and not a refusal, and it
     // says which of the two keys the program was decrypted with.
-    if (m.b.system == .cps2) shell.cardRow(ui, "KEY", if (key == .none) .bad else .good, "{s}", .{
+    if (m.b.system == .cps2) return shell.cardRow(ui, "KEY", if (key == .none) .bad else .good, "{s}", .{
         switch (key) {
             .none => "SUICIDED BOARD",
             .set => "DECRYPTED",
             .board => "BOARD FILE",
         },
     });
-    // Which CPS-B-21 batch this board is, as far as anything can tell from
-    // outside: the register offsets the chip was strapped for. Each reading
-    // needs its own buffer — they are both alive until the row is formatted.
+
+    // The Kabuki key is the one thing in the board file that is a secret
+    // rather than a setting: without it the Z80 runs garbage and the cabinet
+    // is silent, so whether there is one is worth a line of its own. Only a
+    // QSound board has one to be missing.
+    if (m.b.sound() == .cps1) return;
+    shell.cardRow(ui, "KABUKI", if (m.b.kabuki == null) .bad else .good, "{s}", .{
+        if (m.b.kabuki == null) "NO KEY" else "KEY SET",
+    });
+}
+
+/// Which CPS-B-21 batch this board is, as far as anything can tell from
+/// outside: the register offsets the chip was strapped for.
+fn chipRow(ui: *shell.Ui, m: *const Machine) void {
+    // Each reading needs its own buffer — they are both alive until the row is
+    // formatted.
     var ctrl: [2]u8 = undefined;
     var pal: [2]u8 = undefined;
     shell.cardRow(ui, "CPS-B", .plain, "ctrl {s} / pal {s} / gfx x{d}", .{
@@ -501,7 +518,6 @@ fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8, key: emu.Key
         hexOrNone(&pal, m.b.palette_control),
         m.b.range_count,
     });
-    shell.cardRow(ui, "SUM", .plain, "{x:0>4}", .{programSum(m.rom.program)});
 }
 
 /// A CPS-B register offset for the card, or "--" for one the board file left
