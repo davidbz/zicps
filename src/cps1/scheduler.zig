@@ -21,12 +21,9 @@ const Core = m68k.Core(cps1.Machine);
 /// name the register file it hands us.
 pub const Cpu = m68k.Cpu;
 
-/// Vblank on the line after the last visible one, the raster counters at
-/// whatever line they were programmed for, and — when the two land together —
-/// both pins at once, which the 68000 reads as level 6.
-pub const vint_level = 2;
-pub const rint_level = 4;
-pub const vblank_line = chip.first_visible_line + chip.height;
+pub const vint_level = clock.vint_level;
+pub const rint_level = clock.rint_level;
+pub const vblank_line = clock.vblank_line;
 
 /// Runs one whole frame, line by line.
 pub fn runFrame(c: *cps1.Machine, cpu: *m68k.Cpu) void {

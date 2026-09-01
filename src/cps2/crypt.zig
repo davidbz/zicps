@@ -37,34 +37,57 @@ pub const Key = struct {
     dead: bool,
 };
 
+/// The key as the chip reads it: ten words, wired to the ROM through a
+/// rotation, of which four are the master key and one is its range. The five
+/// between are a watchdog instruction and two constants nothing here reads.
+const key_words = 10;
+const word_bits = 16;
+const key_bits = key_words * word_bits;
+const key_rotation = 317;
+const range_word = 9;
+
+/// An erased key ROM reads all ones, in the range word as everywhere else. What
+/// a board like that nominally covers is the top 64 KiB, in word addresses.
+const dead_range = 0xffff;
+const dead_lower = 0xff0000 / 2;
+const dead_upper = 0xffffff / 2;
+
+/// The range word carries the top of the covered region inverted, in ten bits
+/// of 16 KiB pages: all zeroes covers the whole address space.
+const range_bits = 10;
+const range_mask = (1 << range_bits) - 1;
+const page_bits = 14;
+const page_mask = (1 << page_bits) - 1;
+
 /// Reads the key ROM. A region that is missing or short is read as erased,
 /// because that is what a board whose battery has run down holds.
 pub fn readKey(bytes: []const u8) Key {
-    var decoded: [10]u16 = @splat(0);
-    for (0..decoded.len * 16) |b| {
-        // The key is wired to the ROM through a rotation: bit b of the key
-        // comes from bit (317 - b) mod 160 of what the chip holds.
-        const bit = (317 - b) % 160;
+    var decoded: [key_words]u16 = @splat(0);
+    for (0..key_bits) |b| {
+        const bit = (key_rotation - b) % key_bits;
         const byte: u8 = if (bit / 8 < bytes.len) bytes[bit / 8] else 0xff;
         if ((byte >> @intCast((bit ^ 7) % 8)) & 1 != 0)
-            decoded[b / 16] |= @as(u16, 0x8000) >> @intCast(b % 16);
+            decoded[b / word_bits] |= @as(u16, 0x8000) >> @intCast(b % word_bits);
     }
 
-    // decoded[4..7] are the watchdog instruction, decoded[7] and decoded[8] are
-    // constants, and decoded[9] is how much of the program the key covers.
     const master = [2]u32{
         (@as(u32, decoded[0]) << 16) | decoded[1],
         (@as(u32, decoded[2]) << 16) | decoded[3],
     };
-    if (decoded[9] == 0xffff) return .{
+    if (decoded[range_word] == dead_range) return .{
         .master = master,
-        .lower = 0xff0000 / 2,
-        .upper = 0xffffff / 2,
+        .lower = dead_lower,
+        .upper = dead_upper,
         .dead = true,
     };
-    const upper = (((~@as(u32, decoded[9]) & 0x3ff) << 14) | 0x3fff) + 1;
+    const upper = (((~@as(u32, decoded[range_word]) & range_mask) << page_bits) | page_mask) + 1;
     return .{ .master = master, .lower = 0, .upper = upper / 2, .dead = false };
 }
+
+/// The second key depends only on the low sixteen bits of a word address, so
+/// it is worked out once for each of them and every word that shares them is
+/// decrypted with it.
+const subkey_addresses = 0x10000;
 
 /// Decrypts `rom` into `dec`, both the program region as the 68000 reads it:
 /// big-endian words, same length. Outside the key's range the word is copied,
@@ -84,7 +107,7 @@ pub fn decrypt(rom: []const u8, dec: []u8, key: Key) void {
     tweak(&key1[2], 1, 5);
     tweak(&key1[2], 8, 11);
 
-    for (0..0x10000) |i| {
+    for (0..subkey_addresses) |i| {
         const seed = feistel(@intCast(i), fn1_group_a, fn1_group_b, &fn1_rounds, key1);
         var subkey = expandSubkey(seed);
         subkey[0] ^= key.master[0];
@@ -101,7 +124,7 @@ pub fn decrypt(rom: []const u8, dec: []u8, key: Key) void {
         tweak(&key2[3], 1, 5);
 
         var a = i;
-        while (a < words) : (a += 0x10000) {
+        while (a < words) : (a += subkey_addresses) {
             const word = std.mem.readInt(u16, rom[a * 2 ..][0..2], .big);
             const plain = if (a >= key.lower and a <= key.upper)
                 feistel(word, fn2_group_a, fn2_group_b, &fn2_rounds, key2)

@@ -83,6 +83,15 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    // The 68000's data bus: the lanes, and what a device wired to one of them
+    // answers. The maps that put a device at an address are each board's own.
+    const bus = b.addModule("bus", .{
+        .root_source_file = b.path("src/common/bus.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "romset", .module = romset }},
+    });
+
     const controls = b.addModule("controls", .{
         .root_source_file = b.path("src/common/controls.zig"),
         .target = target,
@@ -153,6 +162,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "board", .module = board },
             .{ .name = "romset", .module = romset },
+            .{ .name = "bus", .module = bus },
             .{ .name = "video", .module = video },
             .{ .name = "audio", .module = audio },
             .{ .name = "soundboard", .module = soundboard },
@@ -192,6 +202,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "board", .module = board },
+            .{ .name = "bus", .module = bus },
             .{ .name = "romset", .module = romset },
             .{ .name = "video", .module = video },
             .{ .name = "audio", .module = audio },
@@ -230,8 +241,8 @@ pub fn build(b: *std.Build) void {
     });
 
     // Which generation a loaded set is, as one tagged union. It knows both
-    // trees, so by §3.1 it is not a common module: it sits at the frontend
-    // level, beside `main.zig`, and everything below it stays generation-blind.
+    // trees, so it is not a common module: it sits at the frontend level,
+    // beside `main.zig`, and everything below it stays generation-blind.
     const machine = b.addModule("machine", .{
         .root_source_file = b.path("src/machine.zig"),
         .target = target,
@@ -309,11 +320,9 @@ pub fn build(b: *std.Build) void {
             .{ .name = "cps1", .module = cps1 },
             .{ .name = "controls", .module = controls },
             .{ .name = "video", .module = video },
-            .{ .name = "cps1_video", .module = cps1_video },
             .{ .name = "scheduler", .module = scheduler },
             .{ .name = "clock", .module = clock },
             .{ .name = "kabuki", .module = kabuki },
-            .{ .name = "soundboard", .module = soundboard },
             .{ .name = "qsound", .module = qsound },
             .{ .name = "audio", .module = audio },
             .{ .name = "state", .module = state },
@@ -399,7 +408,7 @@ pub fn build(b: *std.Build) void {
         board,  romset,  video,      cps1,           cps1_video, scheduler, input,
         config, audio,   kabuki,     qsound,         soundboard, snow,      boards,
         ym2151, oki,     state,      system_tests,   clock,      controls,  eeprom,
-        cps2,   machine, cps2_crypt, cps2_scheduler, cps2_video,
+        cps2,   machine, cps2_crypt, cps2_scheduler, cps2_video, bus,
     };
     for (modules) |module| {
         const tests = b.addTest(.{ .root_module = module });
@@ -419,11 +428,8 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "board", .module = board },
             .{ .name = "boards", .module = boards },
-            .{ .name = "cps1", .module = cps1 },
-            .{ .name = "cps2", .module = cps2 },
             .{ .name = "machine", .module = machine },
             .{ .name = "controls", .module = controls },
-            .{ .name = "scheduler", .module = scheduler },
         },
     });
     const compat = b.addExecutable(.{ .name = "compat", .root_module = compat_module });
@@ -510,20 +516,14 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .imports = &.{
             .{ .name = "board", .module = board },
-            .{ .name = "romset", .module = romset },
-            .{ .name = "cps1", .module = cps1 },
-            .{ .name = "cps2", .module = cps2 },
             .{ .name = "machine", .module = machine },
-            .{ .name = "scheduler", .module = scheduler },
             .{ .name = "clock", .module = clock },
             .{ .name = "controls", .module = controls },
             .{ .name = "eeprom", .module = eeprom },
             .{ .name = "video", .module = video },
-            .{ .name = "cps1_video", .module = cps1_video },
             .{ .name = "audio", .module = audio },
             .{ .name = "input", .module = input },
             .{ .name = "config", .module = config },
-            .{ .name = "state", .module = state },
             .{ .name = "snow", .module = snow },
             .{ .name = "boards", .module = boards },
             .{ .name = "shell", .module = shell },
