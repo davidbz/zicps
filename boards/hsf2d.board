@@ -1,0 +1,48 @@
+# Board file for MAME's `hsf2d`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key: `key` below names the twenty bytes the set should
+# carry, and `crypt` is what that battery held, from the last MAME to
+# write the keys down (0.176, BSD-3-Clause, David Haywood).
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   hs2ad.03 crc=0x0153d371
+program = 0x080000 0x080000 word   hs2ad.04 crc=0x0276b78a
+program = 0x100000 0x080000 word   hs2.05 crc=0xdde34a35
+program = 0x180000 0x080000 word   hs2.06 crc=0xf4e56dda
+program = 0x200000 0x080000 word   hs2.07 crc=0xee4420fc
+program = 0x280000 0x080000 word   hs2.08 crc=0xc9441533
+program = 0x300000 0x080000 word   hs2.09 crc=0x3fc638a8
+program = 0x380000 0x080000 word   hs2.10 crc=0x20d0f9e4
+
+gfx = 0x000000 0x800000 word64 hs2.13m crc=0xa6ecab17
+gfx = 0x000002 0x800000 word64 hs2.15m crc=0x10a0ae4d
+gfx = 0x000004 0x800000 word64 hs2.17m crc=0xadfa7726
+gfx = 0x000006 0x800000 word64 hs2.19m crc=0xbb3ae322
+
+audio = 0x000000 0x008000 byte   hs2.01 crc=0xc1a13786
+audio = 0x010000 0x018000 byte   hs2.01 0x8000 crc=0xc1a13786
+audio = 0x028000 0x020000 byte   hs2.02 crc=0x2d8794aa
+
+qsound = 0x000000 0x800000 word   hs2.11m crc=0x0e15c359
+
+key = 0x000000 0x000014 byte   phoenix.key crc=0x2cf772b0
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

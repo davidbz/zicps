@@ -1,0 +1,44 @@
+# Board file for MAME's `mvscjsing`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key: `key` below names the twenty bytes the set should
+# carry, and `crypt` is what that battery held, from the last MAME to
+# write the keys down (0.176, BSD-3-Clause, David Haywood).
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x200000 byte16 mvc_ja.simm1 crc=0x6a2ef7c2
+program = 0x000001 0x200000 byte16 mvc_ja.simm3 crc=0x699d09ad
+
+gfx = 0x000000 0x800000 word64 mvc64-13m.13 crc=0x8428ce69
+gfx = 0x000002 0x800000 word64 mvc64-15m.15 crc=0x2e0028f4
+gfx = 0x000004 0x800000 word64 mvc64-17m.17 crc=0x308ca826
+gfx = 0x000006 0x800000 word64 mvc64-19m.19 crc=0x10699fe1
+
+audio = 0x000000 0x008000 byte   mvc.01 crc=0x41629e95
+audio = 0x010000 0x018000 byte   mvc.01 0x8000 crc=0x41629e95
+audio = 0x028000 0x020000 byte   mvc.02 crc=0x963abf6b
+
+qsound = 0x000000 0x800000 word   mvc64-11m.11 crc=0x5d8819e0
+
+key = 0x000000 0x000014 byte   mvscj.key crc=0x9dedbcaf
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1
+
+crypt = 0xafc16138 0x97123eb0 0x000000 0x100000

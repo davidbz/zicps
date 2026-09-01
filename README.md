@@ -12,19 +12,26 @@ run anything.
 ## What it can do
 
 - Runs CPS-1 and CPS-1.5 sets, from a zip or a directory of chip images, with
-  accurate video and QSound audio.
-- Ships a board file for nearly every set MAME lists, so `zicps sf2.zip` just
-  runs with nothing to configure.
+  accurate video and sound — QSound, or the older YM2151 + OKI M6295 board.
+- Ships a board file for nearly every set MAME lists, CPS-1 and CPS-2 both, so
+  `zicps sf2.zip` just runs with nothing to configure.
 - Keeps the board's own settings in a file beside your set, so what you set in
   its service menu is still there next time.
 - Drag-and-drop and menu-based loading, pause, fast-forward, frame advance,
   screenshots, fullscreen, CRT-style scanline overlay.
 - Rebindable keys for two players, on a 3- or 6-button panel.
+- Save states, in nine slots plus a quicksave.
 - Deterministic enough to record a run and replay it frame for frame, and to
   render with no window at all and hash the result.
 
-A few things aren't supported: CPS-1 boards with the older YM2151 + ADPCM sound
-hardware (those sets run silent), CP System II, save states, netplay and cheats.
+A few things aren't supported: netplay and cheats. CP System II works: a set
+loads, decrypts and draws, and a board file ships for it. The twenty-byte
+decryption key belongs to your set — if yours has one, in the zip or lying
+beside it, that is the key zicps uses. Most zips in circulation predate MAME
+moving those keys into the sets, so the board file also carries what that
+board's battery held and runs the set on that instead. Six CPS-2 sets have been
+watched here; the other 316 board files are transcriptions nobody has checked
+against a board, and 68 of them carry no key of their own to fall back on.
 
 ## The board file
 
@@ -91,6 +98,9 @@ window or pick one from the menu.
 | P | Pause |
 | Space | Scanlines |
 | F5 | Reset |
+| F2 / F4 | Save / load state, in the selected slot |
+| F3 | Next slot |
+| F6 / F7 | Quicksave / quickload |
 | F8 | Advance one frame (and pause) |
 | F11 | Fullscreen |
 | F12 | Screenshot |
@@ -148,7 +158,8 @@ zicps is built on top of [z68k](https://github.com/davidbz/z68k) and
 and leans on some excellent community research:
 
 - [MAME](https://github.com/mamedev/mame)'s Capcom driver — the CPS-B-21
-  register mappings and Kabuki keys the board files are transcribed from.
+  register mappings, Kabuki keys and CPS-2 decryption keys the board files are
+  transcribed from.
 - [jtcps1](https://github.com/jotego/jtcores) — Jotego's hardware-verified FPGA
   core for this board family.
 - [Fabien Sanglard's CPS-1 graphics study](https://fabiensanglard.net/cps1_gfx/)
@@ -162,5 +173,5 @@ and leans on some excellent community research:
 ## License
 
 MIT. See [`LICENSE`](LICENSE). The board files under `boards/` are transcribed
-from MAME's CPS-1 driver and carry its BSD-3-Clause terms; see
+from MAME's Capcom drivers and carry their BSD-3-Clause terms; see
 [`boards/README.md`](boards/README.md).

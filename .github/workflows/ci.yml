@@ -74,7 +74,7 @@ jobs:
       # a green build that tested less than it looks. The video milestones score
       # against an acceptance ROM that is not fetched at all —
       # test/system_test.zig assembles it. The other fetched tree, MAME's CPS-1
-      # driver, has a job of its own below, because nothing in this one reads it.
+      # drivers, has a job of its own below, because nothing in this one reads it.
       - name: Fetch the differential sound references
         shell: bash
         run: |
@@ -100,7 +100,7 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: "0.16.0"
-      - name: Fetch MAME's CPS-1 driver
+      - name: Fetch MAME's Capcom drivers
         shell: bash
         run: ./tools/fetch_mame_source.sh
       - name: Regenerate the board library

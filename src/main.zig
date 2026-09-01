@@ -456,7 +456,7 @@ fn romRow(ui: *shell.Ui, name: []const u8, count: usize, bytes: usize) void {
 /// The card the menu shows beside itself: what the set and the board file
 /// turned out to say, all of it read out of the two files the user supplied.
 /// Built when the set goes in, because none of it changes while the game plays.
-fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8, suicided: bool) void {
+fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8, key: emu.KeySource) void {
     shell.cardStart(ui, std.fs.path.basename(set), m.from());
 
     var regions = std.EnumArray(board.Region, usize).initFill(0);
@@ -479,12 +479,17 @@ fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8, suicided: bo
     if (!plain and m.b.system == .cps1) shell.cardRow(ui, "KABUKI", if (m.b.kabuki == null) .bad else .good, "{s}", .{
         if (m.b.kabuki == null) "NO KEY" else "KEY SET",
     });
-    // A CPS-2 board's key is in the set rather than the board file, and a board
-    // whose battery went flat reads back as one that says nothing. It still
-    // runs — on its own ciphertext, into a self-test that fails — so this is a
-    // line on the card and not a refusal.
-    if (m.b.system == .cps2) shell.cardRow(ui, "KEY", if (suicided) .bad else .good, "{s}", .{
-        if (suicided) "SUICIDED BOARD" else "DECRYPTED",
+    // A CPS-2 board's key belongs to the set; a board whose battery went flat
+    // carries none, and then the board file's transcription of what that
+    // battery held runs it. With neither it still runs — on its own ciphertext,
+    // into a self-test that fails — so this is a line and not a refusal, and it
+    // says which of the two keys the program was decrypted with.
+    if (m.b.system == .cps2) shell.cardRow(ui, "KEY", if (key == .none) .bad else .good, "{s}", .{
+        switch (key) {
+            .none => "SUICIDED BOARD",
+            .set => "DECRYPTED",
+            .board => "BOARD FILE",
+        },
     });
     // Which CPS-B-21 batch this board is, as far as anything can tell from
     // outside: the register offsets the chip was strapped for. Each reading
@@ -592,6 +597,10 @@ const Window = struct {
     set: []const u8 = "",
     frames: u32 = 0,
     quit: bool = false,
+    /// The halt has been said once. A halted 68000 is a still picture, not a
+    /// closed window, so the reason is said the frame it happens and then left
+    /// on the card rather than repeated at every refresh.
+    said_halted: bool = false,
     nv_next: f64 = 0,
     applied_scale: u8 = 0,
     applied_fullscreen: bool = false,
@@ -659,7 +668,7 @@ fn windowed(
         remember(cfg, &w.ui, w.set);
         c.start(m.b, m.rom);
         loadNv(io, c, w.set);
-        describeBoard(&w.ui, m, w.set, c.suicided());
+        describeBoard(&w.ui, m, w.set, c.keySource());
     }
 
     try runLoop(&w);
@@ -680,7 +689,8 @@ fn openWindow(cfg: *const Config) !void {
 /// One drawn frame a turn: what the shell asked for, what the machine ran of
 /// it, and what is drawn of that.
 fn runLoop(w: *Window) !void {
-    while (!rl.WindowShouldClose() and !w.quit and !w.c.cpu().halted) {
+    while (!rl.WindowShouldClose() and !w.quit) {
+        sayHalted(w);
         try serveRequest(w);
         refreshSlots(w);
         applyOptions(w);
@@ -691,6 +701,20 @@ fn runLoop(w: *Window) !void {
         // case where outrunning the device is the point.
         if (running and w.has_audio and !w.ui.fast) paceToAudio(w.c, w.io);
     }
+}
+
+/// A halted 68000 used to close the window, which is right for a board that
+/// died of something and wrong for the one board that halts on purpose: a
+/// CPS-2 set with no key runs its own ciphertext into a double bus fault
+/// inside the first frame. So the picture freezes where it stopped, the menu
+/// still opens over it, and the reason is said once.
+fn sayHalted(w: *Window) void {
+    if (!w.c.cpu().halted or w.said_halted) return;
+    w.said_halted = true;
+    const cpu = w.c.cpu();
+    if (w.c.suicided()) {
+        w.ui.status("the 68000 halted at pc={x:0>6}: a suicided board runs its own ciphertext", .{cpu.pc});
+    } else w.ui.status("the 68000 halted at pc={x:0>6} sr={x:0>4}", .{ cpu.pc, @as(u16, @bitCast(cpu.sr)) });
 }
 
 /// The battery, the replay log and the run's own summary: what a window leaves
@@ -717,6 +741,7 @@ fn serveRequest(w: *Window) !void {
             w.c.start(m.b, m.rom);
             loadNv(w.io, w.c, w.set);
             w.frames = 0;
+            w.said_halted = false;
         },
         .load => |p| loadIntoWindow(w, p),
         // Gated on a set being in the way `.reset` is: with no machine there is
@@ -750,13 +775,14 @@ fn loadIntoWindow(w: *Window, path: []const u8) void {
     remember(w.cfg, &w.ui, w.set);
     w.c.start(next.b, next.rom);
     loadNv(w.io, w.c, w.set);
-    describeBoard(&w.ui, &next, w.set, w.c.suicided());
+    describeBoard(&w.ui, &next, w.set, w.c.keySource());
     w.ui.status("{s}: {d} KiB program, {d} KiB graphics", .{
         std.fs.path.basename(w.set),
         next.rom.program.len >> 10,
         next.rom.gfx.len >> 10,
     });
     w.frames = 0;
+    w.said_halted = false;
 }
 
 /// A set that loaded goes on the recent list, which lives in the options file:
@@ -804,7 +830,7 @@ fn stepFrames(w: *Window) !bool {
         w.ui.six = w.cfg.buttons == .six;
     }
 
-    const running = w.machine.* != null and !w.ui.open and (!w.ui.paused or w.ui.step);
+    const running = w.machine.* != null and !w.c.cpu().halted and !w.ui.open and (!w.ui.paused or w.ui.step);
     if (!running) {
         w.c.part("inputs").* = .{};
         return false;

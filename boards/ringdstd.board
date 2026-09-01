@@ -1,0 +1,55 @@
+# Board file for MAME's `ringdstd`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key: `key` below names the twenty bytes the set should
+# carry, and `crypt` is what that battery held, from the last MAME to
+# write the keys down (0.176, BSD-3-Clause, David Haywood).
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   smbed.03b crc=0xf6fba4cd
+program = 0x080000 0x080000 word   smbed.04b crc=0x193bc493
+program = 0x100000 0x080000 word   smbed.05b crc=0x168cccbb
+program = 0x180000 0x080000 word   smbed.06b crc=0x04673262
+program = 0x200000 0x080000 word   smb.07 crc=0xb9a11577
+program = 0x280000 0x080000 word   smb.08 crc=0xf931b76b
+
+gfx = 0x000000 0x200000 word64 smb.13m crc=0xd9b2d1de
+gfx = 0x000002 0x200000 word64 smb.15m crc=0x9a766d92
+gfx = 0x000004 0x200000 word64 smb.17m crc=0x51800f0f
+gfx = 0x000006 0x200000 word64 smb.19m crc=0x35757e96
+gfx = 0x800000 0x200000 word64 smb.14m crc=0xe5bfd0e7
+gfx = 0x800002 0x200000 word64 smb.16m crc=0xc56c0866
+gfx = 0x800004 0x200000 word64 smb.18m crc=0x4ded3910
+gfx = 0x800006 0x200000 word64 smb.20m crc=0x26ea1ec5
+gfx = 0x1000000 0x080000 word64 smb.21m crc=0x0a08c5fc
+gfx = 0x1000002 0x080000 word64 smb.23m crc=0x0911b6c4
+gfx = 0x1000004 0x080000 word64 smb.25m crc=0x82d6c4ec
+gfx = 0x1000006 0x080000 word64 smb.27m crc=0x9b48678b
+
+audio = 0x000000 0x008000 byte   smb.01 crc=0x0abc229a
+audio = 0x010000 0x018000 byte   smb.01 0x8000 crc=0x0abc229a
+audio = 0x028000 0x020000 byte   smb.02 crc=0xd051679a
+
+qsound = 0x000000 0x200000 word   smb.11m crc=0xc56935f9
+qsound = 0x200000 0x200000 word   smb.12m crc=0x955b0782
+
+key = 0x000000 0x000014 byte   phoenix.key crc=0x2cf772b0
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

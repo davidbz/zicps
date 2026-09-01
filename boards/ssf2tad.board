@@ -1,0 +1,56 @@
+# Board file for MAME's `ssf2tad`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key: `key` below names the twenty bytes the set should
+# carry, and `crypt` is what that battery held, from the last MAME to
+# write the keys down (0.176, BSD-3-Clause, David Haywood).
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   sfxad.03c crc=0xe3c92ece
+program = 0x080000 0x080000 word   sfxad.04a crc=0x9bf3bb2e
+program = 0x100000 0x080000 word   sfxad.05 crc=0xc63358d0
+program = 0x180000 0x080000 word   sfxad.06a crc=0xccb29808
+program = 0x200000 0x080000 word   sfxad.07 crc=0x61f94982
+program = 0x280000 0x080000 word   sfxad.08 crc=0xd399c36c
+program = 0x300000 0x080000 word   sfxad.09 crc=0x436784ae
+
+gfx = 0x000000 0x200000 word64 sfx.13m crc=0xcf94d275
+gfx = 0x000002 0x200000 word64 sfx.15m crc=0x5eb703af
+gfx = 0x000004 0x200000 word64 sfx.17m crc=0xffa60e0f
+gfx = 0x000006 0x200000 word64 sfx.19m crc=0x34e825c5
+gfx = 0x800000 0x100000 word64 sfx.14m crc=0xb7cc32e7
+gfx = 0x800002 0x100000 word64 sfx.16m crc=0x8376ad18
+gfx = 0x800004 0x100000 word64 sfx.18m crc=0xf5b1b336
+gfx = 0x800006 0x100000 word64 sfx.20m crc=0x459d5c6b
+gfx = 0xc00000 0x100000 word64 sfx.21m crc=0xe32854af
+gfx = 0xc00002 0x100000 word64 sfx.23m crc=0x760f2927
+gfx = 0xc00004 0x100000 word64 sfx.25m crc=0x1ee90208
+gfx = 0xc00006 0x100000 word64 sfx.27m crc=0xf814400f
+
+audio = 0x000000 0x008000 byte   sfx.01 crc=0xb47b8835
+audio = 0x010000 0x018000 byte   sfx.01 0x8000 crc=0xb47b8835
+audio = 0x028000 0x020000 byte   sfx.02 crc=0x0022633f
+
+qsound = 0x000000 0x200000 word   sfx.11m crc=0x9bdbd476
+qsound = 0x200000 0x200000 word   sfx.12m crc=0xa05e3aab
+
+key = 0x000000 0x000014 byte   phoenix.key crc=0x2cf772b0
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1

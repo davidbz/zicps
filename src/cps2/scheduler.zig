@@ -87,7 +87,18 @@ pub fn reset(c: *cps2.Machine, cpu: *m68k.Cpu) void {
 /// build, taken again on every reset. Cache it on the set if a reset ever feels
 /// slow enough to notice.
 fn decrypt(c: *cps2.Machine) void {
-    const key = crypt.readKey(c.rom.key);
+    var key = crypt.readKey(c.rom.key);
+    // A set that arrives without the twenty bytes its battery held runs its own
+    // ciphertext, unless the board file wrote that key down. The set's own key
+    // always wins: a real battery beats a transcription.
+    c.key_from_board = key.dead and c.board.crypt != null;
+    if (c.key_from_board) key = .{
+        .master = c.board.crypt.?.master,
+        // The board file holds byte addresses, the way MAME writes them.
+        .lower = c.board.crypt.?.lower / 2,
+        .upper = c.board.crypt.?.upper / 2,
+        .dead = false,
+    };
     c.suicided = key.dead;
     if (c.rom.decrypted.ptr == c.rom.program.ptr) return;
     crypt.decrypt(c.rom.program, c.rom.decrypted, key);
@@ -158,6 +169,23 @@ test "the 68000 starts at its reset vector, out of the opcode window" {
     try testing.expectEqual(@as(u32, 0x00ff0000), cpu.a[7]);
     // No key ROM at all reads as a board whose battery has gone.
     try testing.expect(c.suicided);
+}
+
+test "a set with no key of its own runs on the key the board file holds" {
+    var rom = spinRom();
+    var dec: [0x408]u8 = @splat(0);
+    var c = spinning(&rom);
+    c.rom.decrypted = &dec;
+    // What avsp's battery held, as the board file writes it down.
+    c.board.crypt = .{ .master = .{ 0x15208f79, 0x4ade6cb3 }, .lower = 0, .upper = 0x100000 };
+    var cpu: m68k.Cpu = .{};
+    reset(&c, &cpu);
+
+    try testing.expect(!c.suicided);
+    try testing.expect(c.key_from_board);
+    // The opcode at 0x400 is inside the range that key covers, so the view
+    // the 68000 fetches from is no longer the program itself.
+    try testing.expect(!std.mem.eql(u8, rom[0x400..0x402], dec[0x400..0x402]));
 }
 
 test "a frame runs a 16 MHz frame's worth of cycles, and the remainder carries" {

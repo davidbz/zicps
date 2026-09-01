@@ -1,0 +1,55 @@
+# Board file for MAME's `pgear`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key: `key` below names the twenty bytes the set should
+# carry, and `crypt` is what that battery held, from the last MAME to
+# write the keys down (0.176, BSD-3-Clause, David Haywood).
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   pwgj.03a crc=0xc79c0c02
+program = 0x080000 0x080000 word   pwgj.04a crc=0x167c6ed8
+program = 0x100000 0x080000 word   pwgj.05a crc=0xa63fb400
+program = 0x180000 0x080000 word   pwg.06 crc=0x87a60ce8
+program = 0x200000 0x080000 word   pwg.07 crc=0xf7b148df
+program = 0x280000 0x080000 word   pwg.08 crc=0xcc62823e
+program = 0x300000 0x080000 word   pwg.09a crc=0x4c26baee
+program = 0x380000 0x080000 word   pwg.10 crc=0x07c4fb28
+
+gfx = 0x000000 0x400000 word64 pwg.13m crc=0xae8fe08e
+gfx = 0x000002 0x400000 word64 pwg.15m crc=0xdb560f58
+gfx = 0x000004 0x400000 word64 pwg.17m crc=0xbc475b94
+gfx = 0x000006 0x400000 word64 pwg.19m crc=0x07439ff7
+gfx = 0x1000000 0x100000 word64 pwg.14m crc=0xc3f9ba63
+gfx = 0x1000002 0x100000 word64 pwg.16m crc=0x815b0e7b
+gfx = 0x1000004 0x100000 word64 pwg.18m crc=0x0109c71b
+gfx = 0x1000006 0x100000 word64 pwg.20m crc=0xeb75ffbe
+
+audio = 0x000000 0x008000 byte   pwg.01 crc=0x18a5c0e4
+audio = 0x010000 0x018000 byte   pwg.01 0x8000 crc=0x18a5c0e4
+audio = 0x028000 0x020000 byte   pwg.02 crc=0xc9dfffa6
+
+qsound = 0x000000 0x200000 word   pwg.11m crc=0xa78f7433
+qsound = 0x200000 0x200000 word   pwg.12m crc=0x77438ed0
+
+key = 0x000000 0x000014 byte   pgear.key crc=0xc576d6fd
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1
+
+crypt = 0x9d4c0b8a 0x39081f9e 0x000000 0x100000

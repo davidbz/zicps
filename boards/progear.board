@@ -1,0 +1,50 @@
+# Board file for MAME's `progear`, written by tools/mame_to_board.zig.
+#
+# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+# cps1_v.cpp for the one row every CPS-2 board shares.
+# A CPS-2 board has no battery-backed configuration to hold: it is the
+# CPS-B-21 at its default strapping, and what its battery holds is the
+# decryption key: `key` below names the twenty bytes the set should
+# carry, and `crypt` is what that battery held, from the last MAME to
+# write the keys down (0.176, BSD-3-Clause, David Haywood).
+#
+# Untested: nobody here has this set to boot, so this file is only as
+# right as the table it came from.
+version = 1
+system = cps2
+
+program = 0x000000 0x080000 word   pgae.03 crc=0x8577bc86
+program = 0x080000 0x080000 word   pgae.04 crc=0xd850da04
+
+gfx = 0x000000 0x200000 byte64 pga-simm.01c crc=0x452f98b0
+gfx = 0x000001 0x200000 byte64 pga-simm.01d crc=0x9e672092
+gfx = 0x000002 0x200000 byte64 pga-simm.01a crc=0xae9ddafe
+gfx = 0x000003 0x200000 byte64 pga-simm.01b crc=0x94d72d94
+gfx = 0x000004 0x200000 byte64 pga-simm.03c crc=0x48a1886d
+gfx = 0x000005 0x200000 byte64 pga-simm.03d crc=0x172d7e37
+gfx = 0x000006 0x200000 byte64 pga-simm.03a crc=0x9ee33d98
+gfx = 0x000007 0x200000 byte64 pga-simm.03b crc=0x848dee32
+
+audio = 0x000000 0x008000 byte   pga.01 crc=0xbdbfa992
+audio = 0x010000 0x018000 byte   pga.01 0x8000 crc=0xbdbfa992
+
+qsound = 0x000000 0x200000 word   pga-simm.05a crc=0xc0aac80c
+qsound = 0x200000 0x200000 word   pga-simm.05b crc=0x37a65d86
+qsound = 0x400000 0x200000 word   pga-simm.06a crc=0xd3f1e934
+qsound = 0x600000 0x200000 word   pga-simm.06b crc=0x8b39489a
+
+key = 0x000000 0x000014 byte   progear.key crc=0xeee6b2a8
+
+# --- what a CPS-2 board is strapped to -----------------------------------
+layer_control   = 0x26
+priority        = 0x28 0x2a 0x2c 0x2e
+palette_control = 0x30
+layer_enable    = 0x02 0x04 0x08 0x30 0x30
+id              = 0x32 0xffff
+multiply        = 0x00 0x02 0x04 0x06
+
+bank_sizes = 0x20000 0x20000 0x0 0x0
+gfx_bank = scroll1|scroll2|scroll3 0x00000 0x1ffff 1
+
+crypt = 0x639ad8c6 0xef130df3 0x000000 0x400000

@@ -71,6 +71,18 @@ pub const Kabuki = struct {
     xor: u8,
 };
 
+/// What a CPS-2 board's battery held, for a board whose battery is gone: the
+/// 64-bit master key and the byte addresses the cipher covers. This is the same
+/// thing the twenty-byte `key` ROM encodes, said in the form the decryptor
+/// wants, and it is only ever a stand-in — a set that carries its own key uses
+/// that. Both numbers are as MAME writes them: `upper` is one past the last
+/// address covered.
+pub const Crypt = struct {
+    master: [2]u32,
+    lower: u32,
+    upper: u32,
+};
+
 /// Which generation the board is. `cps1` covers CPS-1 and CPS-1.5, which differ
 /// only in their sound board; `cps2` is the encrypted one. The default is
 /// `cps1` so that every board file written before there was a second generation
@@ -188,6 +200,10 @@ pub const Board = struct {
     range_count: u8 = 0,
 
     kabuki: ?Kabuki = null,
+    /// The key a suicided CPS-2 board can be run on, when the set has none of
+    /// its own. Null on every CPS-1 board and on the sets MAME never wrote a
+    /// key down for.
+    crypt: ?Crypt = null,
 
     roms: [max_roms]Rom = undefined,
     rom_count: u8 = 0,
@@ -259,6 +275,7 @@ const Key = enum {
     bank_sizes,
     gfx_bank,
     kabuki,
+    crypt,
 };
 
 /// The board being built and where in the file it is being built from. It is
@@ -387,6 +404,11 @@ fn applyKey(p: *Parser, k: Key, vals: *Tokens) Error!void {
             .swap2 = try int(u32, p, vals),
             .addr = try int(u16, p, vals),
             .xor = try int(u8, p, vals),
+        },
+        .crypt => b.crypt = .{
+            .master = .{ try int(u32, p, vals), try int(u32, p, vals) },
+            .lower = try int(u32, p, vals),
+            .upper = try int(u32, p, vals),
         },
     }
 }
@@ -711,6 +733,24 @@ test "a board file missing what the machine needs names all of it at once" {
             return error.TestUnexpectedResult;
         }
     }
+}
+
+test "a CPS-2 board file carries the key that board's battery held" {
+    var diag = Diag{};
+    const b = try parse("version = 1\nsystem = cps2\nlayer_control = 0\npriority = 0 2 4 6\n" ++
+        "palette_control = 8\nlayer_enable = 2 4 8 0 0\ngfx_bank = sprites 0 0xffff 0\n" ++
+        "program = 0 0x100 word p.bin\nkey = 0 0x14 byte avsp.key\n" ++
+        "crypt = 0x15208f79 0x4ade6cb3 0x000000 0x100000\n", &diag);
+
+    try testing.expectEqual([2]u32{ 0x15208f79, 0x4ade6cb3 }, b.crypt.?.master);
+    try testing.expectEqual(@as(u32, 0), b.crypt.?.lower);
+    // Byte addresses, as MAME writes them: one past the last address covered.
+    try testing.expectEqual(@as(u32, 0x100000), b.crypt.?.upper);
+    // A file that says nothing about a key says nothing, rather than zero.
+    const bare = try parse("version = 1\nsystem = cps2\nlayer_control = 0\npriority = 0 2 4 6\n" ++
+        "palette_control = 8\nlayer_enable = 2 4 8 0 0\ngfx_bank = sprites 0 0xffff 0\n" ++
+        "program = 0 0x100 word p.bin\nkey = 0 0x14 byte avsp.key\n", &diag);
+    try testing.expectEqual(@as(?Crypt, null), bare.crypt);
 }
 
 test "a sound ROM with no key to decrypt it is refused by name" {

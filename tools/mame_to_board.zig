@@ -1,11 +1,12 @@
-//! MAME's CPS-1 tables, turned into the board files under `boards/`.
+//! MAME's Capcom tables, turned into the board files under `boards/`.
 //!
 //! The battery on a B-board holds numbers that are on no chip and in no dump,
 //! so everyone who emulates this hardware is reading the same transcription:
 //! MAME's `cps1_config_table`, keyed by the romset name the zip is already
 //! called. This reads that table, the PAL-derived bank mappers beside it and
-//! the ROM map of every `ROM_START` in the driver, and writes one board file
-//! per set.
+//! the ROM map of every `ROM_START` in both drivers, and writes one board file
+//! per set. A CPS-1 set has a row of its own in that table; every CPS-2 set is
+//! on the row called `cps2`, because every CPS-2 board is the same board.
 //!
 //! It is run by hand — `zig build boards -- <mame source dir>` — and its
 //! output is committed. Nothing here runs during an ordinary build.
@@ -42,14 +43,23 @@ pub fn main(init: std.process.Init) !void {
     defer src_dir.close(io);
 
     // `cps1_v.cpp` holds what the battery held; `cps1.cpp` holds which files a
-    // set is made of and which decryption key its sound board wants.
+    // set is made of and which decryption key its sound board wants. `cps2.cpp`
+    // holds only the files: the row its 324 sets share is in `cps1_v.cpp` with
+    // the rest of them.
     const video_src = try slurp(arena, io, src_dir, "cps1_v.cpp");
     const driver_src = try slurp(arena, io, src_dir, "cps1.cpp");
     const kabuki_src = try slurp(arena, io, src_dir, "kabuki.cpp");
+    const cps2_src = try slurp(arena, io, src_dir, "cps2.cpp");
+    // The two files from the older MAME, which is the one thing 0.289 cannot
+    // say: it stopped writing the CPS-2 keys down when they moved into the
+    // ROM sets, and a suicided board's set arrives without them.
+    const keys_src = try slurp(arena, io, src_dir, "cps2_keys.h");
+    const keyed_src = try slurp(arena, io, src_dir, "cps2_keyed.cpp");
 
     var m = Mame{ .arena = arena };
     try m.readTables(video_src);
     try m.readGames(kabuki_src, driver_src);
+    try m.readCrypts(keys_src, keyed_src);
 
     var out_dir = cwd.openDir(io, out, .{ .iterate = true }) catch |err|
         fatal("cannot write to {s} ({t})", .{ out, err });
@@ -57,27 +67,42 @@ pub fn main(init: std.process.Init) !void {
 
     var written: std.ArrayList([]const u8) = .empty;
     var skipped: std.ArrayList([]const u8) = .empty;
-    var sets = std.mem.splitSequence(u8, driver_src, "ROM_START(");
-    _ = sets.next(); // everything before the first set
-    while (sets.next()) |rest| {
-        const name = std.mem.trim(u8, rest[0 .. std.mem.indexOfScalar(u8, rest, ')') orelse continue], " \t");
-        const end = std.mem.indexOf(u8, rest, "ROM_END") orelse continue;
-        const text = m.build(name, rest[0..end]) catch |err| switch (err) {
-            error.Unsupported => {
-                try skipped.append(arena, try std.fmt.allocPrint(arena, "{s}: {s}", .{ name, m.why }));
-                continue;
-            },
-            else => return err,
-        };
-        const file = try std.fmt.allocPrint(arena, "{s}.board", .{name});
-        try out_dir.writeFile(io, .{ .sub_path = file, .data = text });
-        try written.append(arena, name);
+    var keyless: std.ArrayList([]const u8) = .empty;
+    // Two drivers, one library. A CPS-1 set has a row of its own in the config
+    // table; every CPS-2 set shares the one row named `cps2`, which is what
+    // makes its half of a board file the same eight lines every time.
+    for ([_]struct { board.System, []const u8 }{ .{ .cps1, driver_src }, .{ .cps2, cps2_src } }) |driver| {
+        var sets = std.mem.splitSequence(u8, driver[1], "ROM_START(");
+        _ = sets.next(); // everything before the first set
+        while (sets.next()) |rest| {
+            const name = std.mem.trim(u8, rest[0 .. std.mem.indexOfScalar(u8, rest, ')') orelse continue], " \t");
+            const end = std.mem.indexOf(u8, rest, "ROM_END") orelse continue;
+            const text = m.build(name, rest[0..end], driver[0]) catch |err| switch (err) {
+                error.Unsupported => {
+                    try skipped.append(arena, try std.fmt.allocPrint(arena, "{s}: {s}", .{ name, m.why }));
+                    continue;
+                },
+                else => return err,
+            };
+            const file = try std.fmt.allocPrint(arena, "{s}.board", .{name});
+            try out_dir.writeFile(io, .{ .sub_path = file, .data = text });
+            try written.append(arena, name);
+            // A set the older MAME never had a row for, or had one under
+            // another name. Its file is fine; it just cannot carry a key.
+            if (driver[0] == .cps2 and m.crypts.get(name) == null)
+                try keyless.append(arena, name);
+        }
     }
 
     try sweep(io, out_dir, written.items);
     try index(arena, io, out_dir, written.items, try handWritten(arena, io, out_dir));
 
     std.debug.print("wrote {d} board files to {s}/\n", .{ written.items.len, out });
+    if (keyless.items.len != 0) {
+        std.debug.print("{d} CPS-2 sets carry no key, so a dump without one stays suicided:\n ", .{keyless.items.len});
+        for (keyless.items) |name| std.debug.print(" {s}", .{name});
+        std.debug.print("\n", .{});
+    }
     if (skipped.items.len == 0) return;
     std.debug.print("skipped {d} sets:\n", .{skipped.items.len});
     for (skipped.items) |line| std.debug.print("  {s}\n", .{line});
@@ -101,8 +126,9 @@ fn sweep(io: std.Io, dir: std.Io.Dir, written: []const []const u8) !void {
 }
 
 /// The boards in `hand/`, which this tool neither writes nor sweeps. MAME's
-/// CPS-1 tables are what it reads, so a generation it cannot read is typed out
-/// by a person; they still belong in the one list, so they are named here.
+/// tables are what it reads, so a board no table covers is typed out by a
+/// person; they still belong in the one list, so they are named here. Nothing
+/// is under there today: both generations are in the tables.
 /// Sorted, because a directory hands them over in whatever order it likes and
 /// this file is committed and diffed.
 fn handWritten(arena: std.mem.Allocator, io: std.Io, out_dir: std.Io.Dir) ![]const []const u8 {
@@ -278,6 +304,11 @@ fn number(text: []const u8) !i64 {
     return std.fmt.parseInt(i64, text, 0);
 }
 
+/// A quoted bare-hex string, which is how the key tables write a number.
+fn hex(text: []const u8) !u32 {
+    return std.fmt.parseInt(u32, unquote(text), 16);
+}
+
 /// The identifier that begins `text`, which for a ROM line is its macro.
 fn word(text: []const u8) []const u8 {
     for (text, 0..) |c, i| {
@@ -346,6 +377,9 @@ const Mame = struct {
     arena: std.mem.Allocator,
     configs: std.StringHashMapUnmanaged(Config) = .empty,
     keys: std.StringHashMapUnmanaged(board.Kabuki) = .empty,
+    /// Each CPS-2 set's decryption key, for the sets whose dumps arrive
+    /// without the twenty bytes the battery used to hold.
+    crypts: std.StringHashMapUnmanaged(board.Crypt) = .empty,
     /// Each set's 68000 crystal, which is not in the config table at all: it is
     /// the machine config the `GAME` row names.
     clocks: std.StringHashMapUnmanaged(u32) = .empty,
@@ -518,46 +552,136 @@ const Mame = struct {
         }
     }
 
+    /// What a CPS-2 battery held, out of the last MAME that still wrote it
+    /// down. The header defines one macro per key and the driver names one
+    /// macro per `ROM_START`, so a set's key is the macro its block mentions.
+    fn readCrypts(m: *Mame, keys_src: []const u8, keyed_src: []const u8) !void {
+        var by_macro: std.StringHashMapUnmanaged(board.Crypt) = .empty;
+        var lines = std.mem.splitScalar(u8, keys_src, '\n');
+        while (lines.next()) |raw| {
+            const line = trim(raw);
+            if (!std.mem.startsWith(u8, line, "#define ")) continue;
+            const macro = word(line["#define ".len..]);
+            const at = std.mem.indexOf(u8, line, "CRYPT_PARAMS") orelse continue;
+            if (std.mem.eql(u8, macro, "CRYPT_PARAMS")) continue; // the macro itself
+            const args = try fields(m.arena, parens(line, at) orelse continue);
+            if (args.len != 4) return error.BadTable;
+            // Bare hex, quoted, the way a `ROM_PARAMETER` carries it.
+            const c = board.Crypt{
+                .master = .{ try hex(args[0]), try hex(args[1]) },
+                .lower = try hex(args[2]),
+                .upper = try hex(args[3]),
+            };
+            // A dead board's key is the erasure itself: FF over the top bank,
+            // which is what a set with no key already does here.
+            if (c.lower == 0xff0000) continue;
+            try by_macro.put(m.arena, macro, c);
+        }
+
+        var sets = std.mem.splitSequence(u8, keyed_src, "ROM_START(");
+        _ = sets.next();
+        while (sets.next()) |rest| {
+            const name = trim(rest[0 .. std.mem.indexOfScalar(u8, rest, ')') orelse continue]);
+            const end = std.mem.indexOf(u8, rest, "ROM_END") orelse continue;
+            var i: usize = 0;
+            const block = rest[0..end];
+            while (i < block.len) {
+                const id = word(block[i..]);
+                if (id.len == 0) {
+                    i += 1;
+                    continue;
+                }
+                i += id.len;
+                if (by_macro.get(id)) |c| {
+                    try m.crypts.put(m.arena, name, c);
+                    break;
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------ a board file
 
     /// One set's board file, or `error.Unsupported` with `why` set. Whatever
     /// comes back has already been through `board.parse`.
-    fn build(m: *Mame, name: []const u8, block: []const u8) ![]const u8 {
-        const config = m.configs.get(name) orelse
-            return m.give("no row in MAME's cps1_config_table", .{});
+    fn build(m: *Mame, name: []const u8, block: []const u8, system: board.System) ![]const u8 {
+        const config = switch (system) {
+            .cps1 => m.configs.get(name) orelse
+                return m.give("no row in MAME's cps1_config_table", .{}),
+            // The one row all 324 of them are on, and the reason a CPS-2 board
+            // file says nothing about itself that its neighbour does not.
+            .cps2 => m.configs.get("cps2") orelse
+                return m.give("no `cps2` row in MAME's cps1_config_table", .{}),
+        };
         // The kludges are sprite layouts and RAM in the wrong place, bent
         // around bootlegs one at a time. A board file cannot say any of it.
         if (config.kludge != 0)
             return m.give("MAME needs bootleg kludge 0x{x} for this set", .{config.kludge});
-        const cpu_hz = m.clocks.get(name) orelse
-            return m.give("no GAME row names a machine config, so nothing says which 68000 this board has", .{});
+        const cpu_hz: ?u32 = switch (system) {
+            .cps1 => m.clocks.get(name) orelse
+                return m.give("no GAME row names a machine config, so nothing says which 68000 this board has", .{}),
+            // Every CPS-2 board is a 16 MHz one, which is what `system = cps2`
+            // already means: a line saying it again is a line to keep in step.
+            .cps2 => null,
+        };
 
         var aw: std.Io.Writer.Allocating = .init(m.arena);
         const w = &aw.writer;
-        try head(w, name, cpu_hz);
-        try m.map(w, block);
-        try registers(w, config);
+        try head(w, name, system, cpu_hz);
+        try m.map(w, block, system);
+        try registers(w, config, system);
         if (m.keys.get(name)) |key|
             try w.print("\nkabuki = 0x{x:0>8} 0x{x:0>8} 0x{x:0>4} 0x{x:0>2}\n", .{ key.swap1, key.swap2, key.addr, key.xor });
+        // What the battery held, for a set whose dump has lost it. The set's
+        // own `.key` still wins wherever there is one.
+        if (m.crypts.get(name)) |c| if (system == .cps2)
+            try w.print("\ncrypt = 0x{x:0>8} 0x{x:0>8} 0x{x:0>6} 0x{x:0>6}\n", .{ c.master[0], c.master[1], c.lower, c.upper });
 
         const text = try aw.toOwnedSlice();
         var diag = board.Diag{};
         const b = board.parse(text, &diag) catch
             return m.give("the board file this makes is not one this build reads: {s}", .{diag.message()});
+        // A CPS-2 board without the twenty bytes its battery holds is not one:
+        // `gigaman2` is in this driver because of what it copies, not what it
+        // is, and it has an MCU and an OKI where the key and QSound should be.
+        if (system == .cps2) {
+            for (b.romList()) |rom| {
+                if (rom.region == .key) break;
+            } else return m.give("MAME gives this set no key ROM, so whatever it is wired as, it is not a CPS-2 board", .{});
+        }
         try m.fits(&b);
         return text;
     }
 
-    fn head(w: *std.Io.Writer, name: []const u8, cpu_hz: u32) !void {
+    fn head(w: *std.Io.Writer, name: []const u8, system: board.System, cpu_hz: ?u32) !void {
         try w.print(
             \\# Board file for MAME's `{s}`, written by tools/mame_to_board.zig.
             \\#
+            \\
+        , .{name});
+        const provenance: []const u8 = switch (system) {
+            .cps1 =>
             \\# The register mapping, the bank table and the Kabuki key are what a
             \\# working board keeps in the RAM its battery holds up,
             \\# transcribed from MAME's CPS-1 driver (BSD-3-Clause, Nicola Salmoria
             \\# and the MAME team): src/mame/capcom/cps1.cpp and cps1_v.cpp.
             \\
-        , .{name});
+            ,
+            // Two files for the same reason MAME needs two: the ROM map is the
+            // set's own, and the register mapping is the generation's.
+            .cps2 =>
+            \\# Transcribed from MAME's CPS-2 driver (BSD-3-Clause, Paul Leaman and
+            \\# the MAME team): src/mame/capcom/cps2.cpp for the ROM map, and
+            \\# cps1_v.cpp for the one row every CPS-2 board shares.
+            \\# A CPS-2 board has no battery-backed configuration to hold: it is the
+            \\# CPS-B-21 at its default strapping, and what its battery holds is the
+            \\# decryption key: `key` below names the twenty bytes the set should
+            \\# carry, and `crypt` is what that battery held, from the last MAME to
+            \\# write the keys down (0.176, BSD-3-Clause, David Haywood).
+            \\
+            ,
+        };
+        try w.writeAll(provenance);
         for (booted) |set| {
             if (std.mem.eql(u8, set, name)) break;
         } else try w.writeAll(
@@ -567,25 +691,27 @@ const Mame = struct {
             \\
         );
         try w.print("version = {d}\n", .{board.version});
+        // `cps1` is the default, so only the other one is worth a line.
+        if (system != .cps1) try w.print("system = {s}\n", .{@tagName(system)});
         // Soldered, not battery-backed, and the one number here that comes out
         // of the machine config rather than the tables.
-        try w.print("cpu_clock = {d}\n", .{cpu_hz});
+        if (cpu_hz) |hz| try w.print("cpu_clock = {d}\n", .{hz});
     }
 
     /// The ROM map, region by region, in the order the chips are listed on the
     /// board rather than the order MAME happens to load them.
-    fn map(m: *Mame, w: *std.Io.Writer, block: []const u8) !void {
+    fn map(m: *Mame, w: *std.Io.Writer, block: []const u8, system: board.System) !void {
         var loads: std.ArrayList(Load) = .empty;
         // What this build cannot express, remembered per region rather than
         // refused on sight, so a set is only turned away for a region it
         // actually has.
         var beyond: [board.region_count]?[]const u8 = @splat(null);
-        try readLoads(m, block, &loads, &beyond);
+        try readLoads(m, block, system, &loads, &beyond);
         try writeLoads(m, w, loads.items, beyond);
     }
 
     /// Every `ROM_LOAD` of a driver's block, as this build's lines.
-    fn readLoads(m: *Mame, block: []const u8, loads: *std.ArrayList(Load), beyond: *[board.region_count]?[]const u8) !void {
+    fn readLoads(m: *Mame, block: []const u8, system: board.System, loads: *std.ArrayList(Load), beyond: *[board.region_count]?[]const u8) !void {
         var region: ?board.Region = null;
         var lines = std.mem.splitScalar(u8, block, '\n');
         while (lines.next()) |raw| {
@@ -616,6 +742,17 @@ const Mame = struct {
                 // The rest of a chip that is not loaded at all: a board file
                 // says where each piece comes from, so a piece nobody reads is
                 // a line nobody writes.
+                continue;
+            }
+
+            if (std.mem.eql(u8, macro, "ROM_FILL")) {
+                // The bottom of a CPS-2 graphics region a set leaves
+                // unpopulated. It is not a chip and there is nothing to name:
+                // the loader already reads an unpopulated CPS-2 graphics byte
+                // as the zero MAME writes here. A fill of anything else, or
+                // anywhere else, is one this build cannot express.
+                if (system == .cps2 and into == .gfx and try number(args[2]) == 0) continue;
+                beyond[@intFromEnum(into)] = try std.fmt.allocPrint(m.arena, "a ROM_FILL of {s} this build cannot express", .{args[2]});
                 continue;
             }
 
@@ -797,6 +934,9 @@ fn regionOf(tag: []const u8) ?board.Region {
     if (std.mem.eql(u8, tag, "audiocpu")) return .audio;
     if (std.mem.eql(u8, tag, "qsound")) return .qsound;
     if (std.mem.eql(u8, tag, "oki")) return .oki;
+    // Not a chip: the twenty bytes a CPS-2 board's battery holds up, which MAME
+    // carries as a region because a dump of one is a file like any other.
+    if (std.mem.eql(u8, tag, "key")) return .key;
     return null;
 }
 
@@ -825,9 +965,15 @@ fn crcOf(hashes: []const u8) ?u32 {
     return std.fmt.parseInt(u32, trim(text), 16) catch null;
 }
 
-fn registers(w: *std.Io.Writer, config: Config) !void {
+fn registers(w: *std.Io.Writer, config: Config, system: board.System) !void {
     const cpsb = config.cpsb;
-    try w.writeAll("\n# --- what the battery held -----------------------------------------------\n");
+    try w.writeAll(switch (system) {
+        .cps1 => "\n# --- what the battery held -----------------------------------------------\n",
+        // The same numbers on every CPS-2 board, and none of them the board's
+        // own: sprites are addressed linearly by the object hardware and are in
+        // no range, and the three scroll layers are all in the second bank.
+        .cps2 => "\n# --- what a CPS-2 board is strapped to -----------------------------------\n",
+    });
     try w.writeAll("layer_control   = ");
     try reg(w, cpsb.layer_control);
     try w.writeAll("\npriority        =");

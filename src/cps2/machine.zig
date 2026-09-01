@@ -175,6 +175,9 @@ pub const Machine = struct {
     /// in the machine turns on it — a dead board runs on its own ciphertext,
     /// which is exactly what it does on a bench — but the card says so.
     suicided: bool = false,
+    /// Whether the key that decrypted the program is the board file's
+    /// transcription of what that battery held, the set having carried none.
+    key_from_board: bool = false,
 
     /// Where in the picture the machine is, and what its chips are owed.
     t: clock.Timing = .{},
