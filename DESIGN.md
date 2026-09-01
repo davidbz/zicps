@@ -676,6 +676,9 @@ binary. Three things make that honest:
   ours says on every line of every file that this is where it came from.
   `tools/mame_to_board.zig` writes them; the output is committed and the tool
   is run by hand.
+  A board no table covers — CPS-2, whose configuration is the same on every
+  board — is typed out under `boards/hand/`, which the tool lists in the index
+  and otherwise leaves alone.
 - **It is selected by name, which is what everyone else does.** MAME keys that
   table off the romset's short name — the zip's basename — and so does FBNeo;
   jtcps1 picks by `.mra` file name. Nobody identifies a board by hashing the

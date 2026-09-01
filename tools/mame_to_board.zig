@@ -76,7 +76,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     try sweep(io, out_dir, written.items);
-    try index(arena, io, out_dir, written.items);
+    try index(arena, io, out_dir, written.items, try handWritten(arena, io, out_dir));
 
     std.debug.print("wrote {d} board files to {s}/\n", .{ written.items.len, out });
     if (skipped.items.len == 0) return;
@@ -101,9 +101,38 @@ fn sweep(io: std.Io, dir: std.Io.Dir, written: []const []const u8) !void {
     }
 }
 
+/// The boards in `hand/`, which this tool neither writes nor sweeps. MAME's
+/// CPS-1 tables are what it reads, so a generation it cannot read is typed out
+/// by a person; they still belong in the one list, so they are named here.
+/// Sorted, because a directory hands them over in whatever order it likes and
+/// this file is committed and diffed.
+fn handWritten(arena: std.mem.Allocator, io: std.Io, out_dir: std.Io.Dir) ![]const []const u8 {
+    var dir = out_dir.openDir(io, "hand", .{ .iterate = true }) catch return &.{};
+    defer dir.close(io);
+
+    var names: std.ArrayList([]const u8) = .empty;
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".board")) continue;
+        try names.append(arena, try arena.dupe(u8, entry.name[0 .. entry.name.len - ".board".len]));
+    }
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn less(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.less);
+    return names.items;
+}
+
 /// The list `src/boards.zig` reads: every board file beside it, embedded, so
 /// that a build of zicps carries them and a changed board file rebuilds it.
-fn index(arena: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, written: []const []const u8) !void {
+fn index(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    written: []const []const u8,
+    hand: []const []const u8,
+) !void {
     var aw: std.Io.Writer.Allocating = .init(arena);
     const w = &aw.writer;
     try w.writeAll(
@@ -116,6 +145,10 @@ fn index(arena: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, written: []const
     );
     for (written) |name| {
         try w.print("    .{{ .name = \"{s}\", .text = @embedFile(\"{s}.board\") }},\n", .{ name, name });
+    }
+    if (hand.len != 0) try w.writeAll("\n    // Under hand/, typed out rather than read off a table.\n");
+    for (hand) |name| {
+        try w.print("    .{{ .name = \"{s}\", .text = @embedFile(\"hand/{s}.board\") }},\n", .{ name, name });
     }
     try w.writeAll("};\n");
     try dir.writeFile(io, .{ .sub_path = "list.zig", .data = try aw.toOwnedSlice() });
