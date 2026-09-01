@@ -51,10 +51,16 @@ pub fn main(init: std.process.Init) !void {
     const driver_src = try slurp(arena, io, src_dir, "cps1.cpp");
     const kabuki_src = try slurp(arena, io, src_dir, "kabuki.cpp");
     const cps2_src = try slurp(arena, io, src_dir, "cps2.cpp");
+    // The two files from the older MAME, which is the one thing 0.289 cannot
+    // say: it stopped writing the CPS-2 keys down when they moved into the
+    // ROM sets, and a suicided board's set arrives without them.
+    const keys_src = try slurp(arena, io, src_dir, "cps2_keys.h");
+    const keyed_src = try slurp(arena, io, src_dir, "cps2_keyed.cpp");
 
     var m = Mame{ .arena = arena };
     try m.readTables(video_src);
     try m.readGames(kabuki_src, driver_src);
+    try m.readCrypts(keys_src, keyed_src);
 
     var out_dir = cwd.openDir(io, out, .{ .iterate = true }) catch |err|
         fatal("cannot write to {s} ({t})", .{ out, err });
@@ -62,6 +68,7 @@ pub fn main(init: std.process.Init) !void {
 
     var written: std.ArrayList([]const u8) = .empty;
     var skipped: std.ArrayList([]const u8) = .empty;
+    var keyless: std.ArrayList([]const u8) = .empty;
     // Two drivers, one library. A CPS-1 set has a row of its own in the config
     // table; every CPS-2 set shares the one row named `cps2`, which is what
     // makes its half of a board file the same eight lines every time.
@@ -81,6 +88,10 @@ pub fn main(init: std.process.Init) !void {
             const file = try std.fmt.allocPrint(arena, "{s}.board", .{name});
             try out_dir.writeFile(io, .{ .sub_path = file, .data = text });
             try written.append(arena, name);
+            // A set the older MAME never had a row for, or had one under
+            // another name. Its file is fine; it just cannot carry a key.
+            if (driver[0] == .cps2 and m.crypts.get(name) == null)
+                try keyless.append(arena, name);
         }
     }
 
@@ -88,6 +99,11 @@ pub fn main(init: std.process.Init) !void {
     try index(arena, io, out_dir, written.items, try handWritten(arena, io, out_dir));
 
     std.debug.print("wrote {d} board files to {s}/\n", .{ written.items.len, out });
+    if (keyless.items.len != 0) {
+        std.debug.print("{d} CPS-2 sets carry no key, so a dump without one stays suicided:\n ", .{keyless.items.len});
+        for (keyless.items) |name| std.debug.print(" {s}", .{name});
+        std.debug.print("\n", .{});
+    }
     if (skipped.items.len == 0) return;
     std.debug.print("skipped {d} sets:\n", .{skipped.items.len});
     for (skipped.items) |line| std.debug.print("  {s}\n", .{line});
@@ -289,6 +305,11 @@ fn number(text: []const u8) !i64 {
     return std.fmt.parseInt(i64, text, 0);
 }
 
+/// A quoted bare-hex string, which is how the key tables write a number.
+fn hex(text: []const u8) !u32 {
+    return std.fmt.parseInt(u32, unquote(text), 16);
+}
+
 /// The identifier that begins `text`, which for a ROM line is its macro.
 fn word(text: []const u8) []const u8 {
     for (text, 0..) |c, i| {
@@ -357,6 +378,9 @@ const Mame = struct {
     arena: std.mem.Allocator,
     configs: std.StringHashMapUnmanaged(Config) = .empty,
     keys: std.StringHashMapUnmanaged(board.Kabuki) = .empty,
+    /// Each CPS-2 set's decryption key, for the sets whose dumps arrive
+    /// without the twenty bytes the battery used to hold.
+    crypts: std.StringHashMapUnmanaged(board.Crypt) = .empty,
     /// Each set's 68000 crystal, which is not in the config table at all: it is
     /// the machine config the `GAME` row names.
     clocks: std.StringHashMapUnmanaged(u32) = .empty,
@@ -512,6 +536,54 @@ const Mame = struct {
         }
     }
 
+    /// What a CPS-2 battery held, out of the last MAME that still wrote it
+    /// down. The header defines one macro per key and the driver names one
+    /// macro per `ROM_START`, so a set's key is the macro its block mentions.
+    fn readCrypts(m: *Mame, keys_src: []const u8, keyed_src: []const u8) !void {
+        var by_macro: std.StringHashMapUnmanaged(board.Crypt) = .empty;
+        var lines = std.mem.splitScalar(u8, keys_src, '\n');
+        while (lines.next()) |raw| {
+            const line = trim(raw);
+            if (!std.mem.startsWith(u8, line, "#define ")) continue;
+            const macro = word(line["#define ".len..]);
+            const at = std.mem.indexOf(u8, line, "CRYPT_PARAMS") orelse continue;
+            if (std.mem.eql(u8, macro, "CRYPT_PARAMS")) continue; // the macro itself
+            const args = try fields(m.arena, parens(line, at) orelse continue);
+            if (args.len != 4) return error.BadTable;
+            // Bare hex, quoted, the way a `ROM_PARAMETER` carries it.
+            const c = board.Crypt{
+                .master = .{ try hex(args[0]), try hex(args[1]) },
+                .lower = try hex(args[2]),
+                .upper = try hex(args[3]),
+            };
+            // A dead board's key is the erasure itself: FF over the top bank,
+            // which is what a set with no key already does here.
+            if (c.lower == 0xff0000) continue;
+            try by_macro.put(m.arena, macro, c);
+        }
+
+        var sets = std.mem.splitSequence(u8, keyed_src, "ROM_START(");
+        _ = sets.next();
+        while (sets.next()) |rest| {
+            const name = trim(rest[0 .. std.mem.indexOfScalar(u8, rest, ')') orelse continue]);
+            const end = std.mem.indexOf(u8, rest, "ROM_END") orelse continue;
+            var i: usize = 0;
+            const block = rest[0..end];
+            while (i < block.len) {
+                const id = word(block[i..]);
+                if (id.len == 0) {
+                    i += 1;
+                    continue;
+                }
+                i += id.len;
+                if (by_macro.get(id)) |c| {
+                    try m.crypts.put(m.arena, name, c);
+                    break;
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------ a board file
 
     /// One set's board file, or `error.Unsupported` with `why` set. Whatever
@@ -544,6 +616,10 @@ const Mame = struct {
         try registers(w, config, system);
         if (m.keys.get(name)) |key|
             try w.print("\nkabuki = 0x{x:0>8} 0x{x:0>8} 0x{x:0>4} 0x{x:0>2}\n", .{ key.swap1, key.swap2, key.addr, key.xor });
+        // What the battery held, for a set whose dump has lost it. The set's
+        // own `.key` still wins wherever there is one.
+        if (m.crypts.get(name)) |c| if (system == .cps2)
+            try w.print("\ncrypt = 0x{x:0>8} 0x{x:0>8} 0x{x:0>6} 0x{x:0>6}\n", .{ c.master[0], c.master[1], c.lower, c.upper });
 
         const text = try aw.toOwnedSlice();
         var diag = board.Diag{};
@@ -583,7 +659,9 @@ const Mame = struct {
             \\# cps1_v.cpp for the one row every CPS-2 board shares.
             \\# A CPS-2 board has no battery-backed configuration to hold: it is the
             \\# CPS-B-21 at its default strapping, and what its battery holds is the
-            \\# decryption key, which is `key` below.
+            \\# decryption key: `key` below names the twenty bytes the set should
+            \\# carry, and `crypt` is what that battery held, from the last MAME to
+            \\# write the keys down (0.176, BSD-3-Clause, David Haywood).
             \\
             ,
         };

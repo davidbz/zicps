@@ -20,6 +20,10 @@ const cps2_scheduler = @import("cps2_scheduler");
 
 pub const Cpu = cps1_scheduler.Cpu;
 
+/// Which key a CPS-2 program was decrypted with. `none` is a suicided board,
+/// running on its own ciphertext.
+pub const KeySource = enum { none, set, board };
+
 pub const Machine = union(board.System) {
     cps1: Arm(cps1.Machine, cps1_scheduler),
     cps2: Arm(cps2.Machine, cps2_scheduler),
@@ -101,6 +105,15 @@ pub const Machine = union(board.System) {
         return switch (m.*) {
             .cps1 => false,
             .cps2 => |*a| a.c.suicided,
+        };
+    }
+
+    /// Where the key that decrypted this program came from: the set's own
+    /// twenty bytes, the board file's transcription of them, or nowhere.
+    pub fn keySource(m: *Machine) KeySource {
+        return switch (m.*) {
+            .cps1 => .none,
+            .cps2 => |*a| if (a.c.suicided) .none else if (a.c.key_from_board) .board else .set,
         };
     }
 };

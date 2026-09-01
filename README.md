@@ -24,12 +24,14 @@ run anything.
 - Deterministic enough to record a run and replay it frame for frame, and to
   render with no window at all and hash the result.
 
-A few things aren't supported: netplay and cheats. CP System II is nearly all
-there — a CPS-2 set loads, decrypts and draws, and a board file ships for it —
-but the twenty-byte decryption key is part of your set, not part of the board
-file. A set without its `.key` file is a suicided board: it runs its own
-ciphertext, exactly as the hardware does with a flat battery. No such set is on
-hand here, so no CPS-2 game has been watched all the way to its title screen.
+A few things aren't supported: netplay and cheats. CP System II works: a set
+loads, decrypts and draws, and a board file ships for it. The twenty-byte
+decryption key belongs to your set — if yours has one, in the zip or lying
+beside it, that is the key zicps uses. Most zips in circulation predate MAME
+moving those keys into the sets, so the board file also carries what that
+board's battery held and runs the set on that instead. Six CPS-2 sets have been
+watched here; the other 316 board files are transcriptions nobody has checked
+against a board, and 68 of them carry no key of their own to fall back on.
 
 ## The board file
 
@@ -156,7 +158,8 @@ zicps is built on top of [z68k](https://github.com/davidbz/z68k) and
 and leans on some excellent community research:
 
 - [MAME](https://github.com/mamedev/mame)'s Capcom driver — the CPS-B-21
-  register mappings and Kabuki keys the board files are transcribed from.
+  register mappings, Kabuki keys and CPS-2 decryption keys the board files are
+  transcribed from.
 - [jtcps1](https://github.com/jotego/jtcores) — Jotego's hardware-verified FPGA
   core for this board family.
 - [Fabien Sanglard's CPS-1 graphics study](https://fabiensanglard.net/cps1_gfx/)
@@ -170,5 +173,5 @@ and leans on some excellent community research:
 ## License
 
 MIT. See [`LICENSE`](LICENSE). The board files under `boards/` are transcribed
-from MAME's CPS-1 driver and carry its BSD-3-Clause terms; see
+from MAME's Capcom drivers and carry their BSD-3-Clause terms; see
 [`boards/README.md`](boards/README.md).

@@ -7,8 +7,8 @@ mapping, the graphics bank table and the Kabuki key, or on CPS-2 the decryption
 key — plus where every chip in the zip lands. See DESIGN.md for the format.
 
 A CPS-2 file says `system = cps2` and is the same file every time apart from its
-ROM lines: MAME has one row for all 324 of those sets, because every CPS-2 board
-is the CPS-B-21 at its default strapping.
+ROM lines and its key: MAME has one row for all 324 of those sets, because every
+CPS-2 board is the CPS-B-21 at its default strapping.
 
 `roms/dino.zip` finds `dino` here, but only last: `--board <path>` wins, then a
 `<set>.board` beside the set, then this library. Your own file always beats
@@ -28,19 +28,31 @@ whose output is committed:
 - `src/mame/capcom/cps2.cpp` — the same, for the CPS-2 sets.
 - `src/mame/capcom/kabuki.cpp` — the four decryption keys per encrypted set.
 
-That data is copyright the MAME team, Nicola Salmoria, Paul Leaman and
-contributors, and is used under the BSD-3-Clause terms MAME grants for it. No
-ROM bytes are here, only the numbers that say how to read yours.
+Two more files come from `mame0176`, the last release that still wrote the CPS-2
+keys down before 0.178 moved them into the ROM sets:
+
+- `src/mame/machine/cps2crypt.h` — one `CRYPT_PARAMS` macro per key
+  (BSD-3-Clause, David Haywood).
+- `src/mame/drivers/cps2.cpp` — which set names which macro.
+
+That data is copyright the MAME team, Nicola Salmoria, Paul Leaman, David
+Haywood and contributors, and is used under the BSD-3-Clause terms MAME grants
+for it. No ROM bytes are here, only the numbers that say how to read yours.
 
 ## What these files do not carry
 
-- **No decryption key.** A CPS-2 file names the `.key` its set should carry and
-  nothing more. Without one in the set, the board is a suicided board: it runs
-  its own ciphertext, exactly as the hardware does.
+- **No key that beats your own.** A CPS-2 file names the `.key` its set should
+  carry, which can be in the zip or lying beside it, and that one always wins.
+  Most files also hold a `crypt` line — what that board's battery held — which
+  runs the set when it carries no key of its own. 68 sets have no `crypt`: 44
+  are the Phoenix sets, which are decrypted already and want none, and 24 are
+  newer than the release the keys come from. Without either the board is a
+  suicided board: it runs its own ciphertext, exactly as the hardware does.
 - **No DIP switches.** Those sets run on their default settings.
-- **No promise beyond the table.** Seven of these boot on real sets here; every
-  other file says `Untested` in its header and is only as right as MAME's table.
-  A wrong mapper there is a wrong mapper here.
+- **No promise beyond the table.** Seven of these boot on real CPS-1 sets here
+  and six CPS-2 sets draw and make sound for 1200 frames; every other file says
+  `Untested` in its header and is only as right as MAME's table. A wrong mapper
+  there is a wrong mapper here.
 
 A `crc=` on a ROM line verifies a dump; it does not name one. A zip under the
 wrong name finds no board at all rather than the wrong board.

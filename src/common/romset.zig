@@ -174,10 +174,17 @@ fn fill(gpa: std.mem.Allocator, src: *Source, b: *const board.Board, regions: st
 /// A board file that names the dump it was written against is checked against
 /// the dump that turned up. The CRC covers the whole file, as MAME's does, so a
 /// chip loaded in two pieces is checked twice rather than by halves.
+///
+/// A file bigger than the board file reads gets a second chance on the part
+/// actually read: an 8 Mbit mask ROM dumped out of a 16 Mbit socket comes back
+/// twice over, and the half we load is still the dump this file was written
+/// for. Nothing is loosened by that — the bytes that reach the region hash to
+/// what the board file names, either way.
 fn verify(rom: board.Rom, bytes: []const u8, diag: *Diag) Error!void {
     const want = rom.crc orelse return;
     const got = std.hash.Crc32.hash(bytes);
     if (got == want) return;
+    if (bytes.len > rom.len and std.hash.Crc32.hash(bytes[rom.src..][0..rom.len]) == want) return;
     return fail(diag, "{s} has crc {x:0>8}, and this board file was written for {x:0>8}: this is a different set", .{ rom.name, got, want });
 }
 
@@ -296,11 +303,24 @@ const Source = struct {
     zip: ?std.Io.File,
 
     fn close(s: *Source) void {
-        if (s.zip) |f| f.close(s.io) else s.dir.close(s.io);
+        if (s.zip) |f| f.close(s.io);
+        s.dir.close(s.io);
     }
 
     fn read(s: *Source, rom: board.Rom) Error![]u8 {
-        if (s.zip != null) return s.readZip(rom);
+        if (s.zip == null) return s.readDir(rom);
+        return s.readZip(rom) catch |err| {
+            // A CPS-2 key is twenty bytes, and most sets in circulation were
+            // zipped before MAME moved the keys out of its source and into the
+            // sets. Rather than make the user repack a 20 MB zip to add them,
+            // one lying beside it counts as part of the set — the same place
+            // the board file and the settings file already live.
+            if (rom.region != .key) return err;
+            return s.readDir(rom);
+        };
+    }
+
+    fn readDir(s: *Source, rom: board.Rom) Error![]u8 {
         return s.dir.readFileAlloc(s.io, rom.name, s.gpa, .limited(max_file)) catch |err|
             fail(s.diag, "cannot read {s}: {t}", .{ rom.name, err });
     }
@@ -392,8 +412,13 @@ fn open(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []const u8
         return src;
     }
 
-    src.zip = parent.openFile(io, path, .{}) catch |err|
+    const zip = parent.openFile(io, path, .{}) catch |err|
         return fail(diag, "cannot open the ROM set {s}: {t}", .{ path, err });
+    errdefer zip.close(io);
+    src.zip = zip;
+    // The directory the zip sits in, for a key file the zip does not carry.
+    src.dir = parent.openDir(io, std.fs.path.dirname(path) orelse ".", .{}) catch |err|
+        return fail(diag, "cannot open the directory {s} is in: {t}", .{ path, err });
     return src;
 }
 
@@ -618,6 +643,32 @@ test "a set under the right name that is not the right dump is refused" {
     set.deinit(testing.allocator);
 }
 
+test "a chip dumped at twice its size loads on the half the board file reads" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeTinySet(tmp.dir);
+
+    // The same chip written out twice over, the way a mask ROM read from a
+    // socket twice its size comes back.
+    var chip: [0x10]u8 = undefined;
+    const dump = std.hash.Crc32.hash(tinyChip(0, &chip));
+    var doubled: [0x20]u8 = undefined;
+    @memcpy(doubled[0..0x10], &chip);
+    @memcpy(doubled[0x10..], &chip);
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "double.bin", .data = &doubled });
+
+    var text: [tiny_board.len + 80]u8 = undefined;
+    var diag = board.Diag{};
+    const b = try board.parse(try std.fmt.bufPrint(&text, "{s}\nprogram = 0x20 0x10 word double.bin crc=0x{x:0>8}\n", .{ tiny_board, dump }), &diag);
+    var set = load(testing.allocator, testing.io, tmp.parent_dir, &tmp.sub_path, &b, &diag) catch {
+        std.debug.print("unexpected: {s}\n", .{diag.message()});
+        return error.TestUnexpectedResult;
+    };
+    defer set.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(u8, 0xa1), set.program[0x20]);
+}
+
 test "a board file asking for more than a board can hold is refused" {
     var sizes = [board.region_count]u64{ max_program + 1, 0, 0, 0, 0, 0 };
     var diag = board.Diag{};
@@ -723,4 +774,42 @@ test "a zipped set loads the same as a loose one" {
 
     try testing.expectEqualSlices(u8, loose.program, zipped_set.program);
     try testing.expectEqualSlices(u8, loose.gfx, zipped_set.gfx);
+}
+
+test "a CPS-2 key beside the zip is part of the set" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeTinySet(tmp.dir);
+
+    const zipped = try tinyZip(testing.allocator);
+    defer testing.allocator.free(zipped);
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "set.zip", .data = zipped });
+
+    var text: [tiny_board.len + 80]u8 = undefined;
+    const with_key = try std.fmt.bufPrint(&text, "{s}\nsystem = cps2\nkey = 0 0x14 byte set.key\n", .{tiny_board});
+    var diag = board.Diag{};
+    const b = try board.parse(with_key, &diag);
+
+    var path_buf: [64]u8 = undefined;
+    const zip_path = try std.fmt.bufPrint(&path_buf, "{s}/set.zip", .{tmp.sub_path});
+
+    // No key anywhere: a suicided board, which loads and reads back erased.
+    var dead = load(testing.allocator, testing.io, tmp.parent_dir, zip_path, &b, &diag) catch {
+        std.debug.print("unexpected: {s}\n", .{diag.message()});
+        return error.TestUnexpectedResult;
+    };
+    defer dead.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, blank), dead.key[0]);
+
+    // The same zip with the key file dropped in beside it, unpacking nothing.
+    var key: [0x14]u8 = undefined;
+    for (&key, 0..) |*byte, i| byte.* = @intCast(i);
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "set.key", .data = &key });
+
+    var alive = load(testing.allocator, testing.io, tmp.parent_dir, zip_path, &b, &diag) catch {
+        std.debug.print("unexpected: {s}\n", .{diag.message()});
+        return error.TestUnexpectedResult;
+    };
+    defer alive.deinit(testing.allocator);
+    try testing.expectEqualSlices(u8, &key, alive.key);
 }
