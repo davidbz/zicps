@@ -471,18 +471,19 @@ pub fn build(b: *std.Build) void {
     // source dir>`. Nothing below runs during an ordinary build, and the tool
     // is built for whatever the rest is, because regenerating a table on a
     // machine that cannot run the result is not a thing anyone does.
-    const boards_tool = b.addExecutable(.{
-        .name = "mame_to_board",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tools/mame_to_board.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "board", .module = board },
-                .{ .name = "romset", .module = romset },
-            },
-        }),
+    const boards_module = b.createModule(.{
+        .root_source_file = b.path("tools/mame_to_board.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "board", .module = board },
+            .{ .name = "romset", .module = romset },
+        },
     });
+    const boards_tool = b.addExecutable(.{ .name = "mame_to_board", .root_module = boards_module });
+    const boards_tests = b.addTest(.{ .root_module = boards_module });
+    test_step.dependOn(&b.addRunArtifact(boards_tests).step);
+    check_step.dependOn(&boards_tests.step);
     const generate = b.addRunArtifact(boards_tool);
     generate.setCwd(b.path("."));
     if (b.args) |args| generate.addArgs(args);
