@@ -82,6 +82,15 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
         const at = sizes.getPtr(rom.region);
         at.* = @max(at.*, rom.mode.extent(rom.dest, rom.len));
     }
+
+    // A CPS-2 set's graphics are shuffled a bank at a time whether or not the
+    // chips fill the last bank, so the region is rounded up to a whole one:
+    // otherwise the unshuffle below runs off the end of what this set happens
+    // to name, and the tiles in the last bank land in the wrong place.
+    if (b.system == .cps2) {
+        const gfx = sizes.getPtr(.gfx);
+        gfx.* = std.mem.alignForward(u64, gfx.*, shuffle_bank);
+    }
     try cap(&sizes.values, diag);
 
     // Graphics arrive interleaved and are expanded afterwards; the other three
@@ -108,6 +117,11 @@ pub fn load(gpa: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, path: []cons
         .oki = oki,
         .key = key,
     }), diag);
+
+    if (b.system == .cps2) {
+        var at: usize = 0;
+        while (at < packed_gfx.len) : (at += shuffle_bank) unshuffle(packed_gfx[at..][0..shuffle_bank]);
+    }
 
     const gfx = try alloc(gpa, packed_gfx.len * pixels_per_byte);
     errdefer gpa.free(gfx);
@@ -239,6 +253,25 @@ pub fn decode(src: []const u8, dst: []u8) void {
     var i: usize = 0;
     while (i + bytes_per_row <= src.len) : (i += bytes_per_row) {
         decodeRow(src[i..][0..bytes_per_row], dst[i * pixels_per_byte ..][0..pixels_per_row]);
+    }
+}
+
+/// A CPS-2 graphics board hands its chips over in an order the tiles are not
+/// in: each 2 MiB bank arrives riffled, a row of sixteen pixels at a time.
+/// Undoing it is the halving MAME does — unshuffle each half of the bank, then
+/// swap the two middle quarters — which comes out as a plain de-interleave.
+pub const shuffle_bank = 0x200000;
+
+fn unshuffle(bank: []u8) void {
+    if (bank.len == 2 * bytes_per_row) return;
+    const half = bank.len / 2;
+    unshuffle(bank[0..half]);
+    unshuffle(bank[half..]);
+
+    const quarter = half / 2;
+    var i: usize = 0;
+    while (i < quarter) : (i += bytes_per_row) {
+        std.mem.swap([bytes_per_row]u8, bank[quarter + i ..][0..bytes_per_row], bank[half + i ..][0..bytes_per_row]);
     }
 }
 
@@ -381,6 +414,24 @@ test "a row of graphics comes out of four planes, high bit last" {
     try testing.expectEqualSlices(u8, &@as([pixels_per_row]u8, @splat(0)), &dst);
 }
 
+test "a shuffled graphics bank comes back in MAME's order" {
+    const bank = try testing.allocator.alloc(u8, shuffle_bank);
+    defer testing.allocator.free(bank);
+
+    var s: u64 = 0x243f6a8885a308d3;
+    var at: usize = 0;
+    while (at < bank.len) : (at += 8) {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        std.mem.writeInt(u64, bank[at..][0..8], s, .little);
+    }
+    unshuffle(bank);
+
+    // Pinned against MAME's own `unshuffle` over the same fill: mame0289
+    // cps2.cpp, compiled and run to take this hash.
+    try testing.expectEqual(@as(u64, 0x97b1c7d039c8cf68), std.hash.Fnv1a_64.hash(bank));
+}
 test "every load mode puts a file where its chip sits" {
     const file = [_]u8{ 0x11, 0x22, 0x33, 0x44 };
     var region: [32]u8 = @splat(0);

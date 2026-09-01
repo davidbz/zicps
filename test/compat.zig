@@ -53,9 +53,6 @@ const start_period = 120;
 const Result = struct {
     frames: u32 = 0,
     halted_pc: ?u32 = null,
-    /// Which generation this was, because two of the readings mean different
-    /// things on each.
-    system: board.System = .cps1,
     /// A CPS-2 board whose key ROM has decayed. It runs, and fails its own
     /// checksum, so it is worth saying before anything else is believed.
     suicided: bool = false,
@@ -67,13 +64,12 @@ const Result = struct {
     still: u32 = 0,
     peak: u32 = 0,
 
-    /// Whether this one is worth pointing a window at. A CPS-2 set is blank and
-    /// still because nothing draws its objects yet, which is M12's job and not
-    /// a fault of this board's: on that generation only a halt is news, and not
-    /// even that on a board with no key, which runs its own ciphertext into the
-    /// weeds exactly as the hardware does.
+    /// Whether this one is worth pointing a window at. Both generations draw
+    /// now, so both are read the same way — except a board whose key ROM has
+    /// decayed, which runs its own ciphertext into the weeds exactly as the
+    /// hardware does. Nothing such a board does is news.
     fn flagged(r: Result) bool {
-        if (r.system == .cps2) return r.halted_pc != null and !r.suicided;
+        if (r.suicided) return false;
         return r.halted_pc != null or r.blank or r.still == r.frames;
     }
 };
@@ -194,7 +190,7 @@ fn run(c: *emu.Machine, m: *const boards.Machine, frames: u32) Result {
     const inputs = c.part("inputs");
     const mixer = c.part("mixer");
 
-    var r = Result{ .blank = true, .system = m.b.system, .suicided = c.suicided() };
+    var r = Result{ .blank = true, .suicided = c.suicided() };
     var last = picture(c);
     var changed: u32 = 0;
     while (r.frames < frames and !cpu.halted) {
@@ -245,9 +241,7 @@ fn report(name: []const u8, r: Result) void {
     std.debug.print("{s: <16}{d: >7}  {s: <10}{s: >7}  {s}{s}\n", .{
         trim(name),
         r.frames,
-        // A blank CPS-2 picture is M12 missing rather than this board failing,
-        // and the column says which of the two it is looking at.
-        if (!r.blank) "drawing" else if (r.system == .cps2) "no video" else "BLANK",
+        if (r.blank) "BLANK" else "drawing",
         std.fmt.bufPrint(&still, "{d}", .{r.still}) catch "?",
         if (r.peak == 0) "silent" else std.fmt.bufPrint(&sound, "peak {d}", .{r.peak}) catch "?",
         if (r.suicided) "  SUICIDED BOARD" else "",

@@ -141,12 +141,19 @@ pub const Machine = struct {
     /// not, because a game only uses it if the volume register says it is there.
     extra: [extra_bytes]u8 = @splat(0),
     /// Two banks of object RAM. `0x8040e0` says which of them the CPU is
-    /// writing; the chip draws the other, and M12 is what makes that visible.
+    /// writing; a game fills the far one and then flips, because the chip is
+    /// reading the near one.
     objram: [2][objram_bytes]u8 = @splat(@splat(0)),
     objram_bank: u1 = 0,
     /// Where the object hardware is told what to draw and how to rank it.
     output: [output_words]u16 = @splat(0),
 
+    /// What the object hardware has: the bank it reads and the priority word
+    /// that went with it, both as they stood at the last vblank. A sprite the
+    /// 68000 writes now is on screen next frame, and a game that reranks its
+    /// layers mid-frame does not tear.
+    obj: [objram_bytes]u8 = @splat(0),
+    pri_ctrl: u16 = 0,
     sound: soundboard.SoundBoard = .{},
     mixer: audio.Mixer = .{},
 

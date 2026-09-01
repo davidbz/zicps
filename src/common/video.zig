@@ -384,27 +384,42 @@ pub const scroll3 = Tilemap{
 
 const tilemaps = [_]Tilemap{ scroll1, scroll2, scroll3 };
 
-/// One line's worth of working picture, and which of its pixels the sprites are
-/// not allowed to touch.
+/// One line's working picture, and the priority plane the sprites are settled
+/// against.
 pub const Line = struct {
     color: [width]u32,
-    /// Set for a pixel where the tilemap immediately under the object list drew
-    /// a pen the board's priority mask calls high.
-    over: [width]bool,
+    /// What the tilemaps left under the object list. CPS-1 writes one bit, set
+    /// where the layer the sprites are drawn straight after put down a pen its
+    /// board calls high; CPS-2 writes a bit per pass and leaves the comparing
+    /// to the sprite masks.
+    prio: [width]u8,
+};
+
+/// What a tilemap pass leaves behind in the priority plane.
+pub const Priority = union(enum) {
+    /// Nothing is settled against this pass: it is under the sprites whole.
+    none,
+    /// CPS-1: mark the pens this tile's priority group calls high, so the
+    /// sprites drawn next skip them.
+    pens,
+    /// CPS-2: mark the pass itself, and leave the pens alone. Which sprites a
+    /// pass covers is not a property of the tile there but of the ranking in
+    /// the object latch, so it is `primasks` that settles it and not this.
+    pass: u8,
 };
 
 /// A blank line, in the colour the last palette entry holds: what the picture
 /// is where nothing draws.
 pub fn beginLine(v: *const Video) Line {
-    return .{ .color = @splat(v.colors[background_entry]), .over = @splat(false) };
+    return .{ .color = @splat(v.colors[background_entry]), .prio = @splat(0) };
 }
 
 /// Draws whichever of the three tilemaps the layer names, or nothing if it
 /// names the object list. Each map is its own comptime shape, so the dispatch
 /// is a compile-time match and not a switch per line.
-pub fn drawLayer(v: *Video, b: *const board.Board, gfx: []const u8, l: *Line, line: u32, which: board.Layer, masks: bool) void {
+pub fn drawLayer(v: *Video, b: *const board.Board, gfx: []const u8, l: *Line, line: u32, which: board.Layer, prio: Priority) void {
     inline for (tilemaps) |m| {
-        if (which == m.layer) drawTilemap(v, b, gfx, m, l, line, masks);
+        if (which == m.layer) drawTilemap(v, b, gfx, m, l, line, prio);
     }
 }
 
@@ -458,7 +473,7 @@ fn scrollX(v: *const Video, comptime m: Tilemap, line: u32) u32 {
     return scroll +% gfxWord(v, table + i * 2);
 }
 
-fn drawTilemap(v: *Video, b: *const board.Board, gfx: []const u8, comptime m: Tilemap, l: *Line, line: u32, masks: bool) void {
+fn drawTilemap(v: *Video, b: *const board.Board, gfx: []const u8, comptime m: Tilemap, l: *Line, line: u32, prio: Priority) void {
     if (m.control_bit != 0 and v.a[video_control / 2] & m.control_bit == 0) return;
     if (!enabled(v, b, m.enable)) return;
 
@@ -487,14 +502,18 @@ fn drawTilemap(v: *Video, b: *const board.Board, gfx: []const u8, comptime m: Ti
         const half: u32 = if (m.paired and col & 1 != 0) m.size else 0;
         const src = mapped * m.tile_pixels + ty * m.row_pixels + half;
         const color = m.page * palette_page_entries + @as(u32, attr & color_mask) * palette_colors;
-        const high = if (masks) priorityMask(v, b, @truncate(attr >> priority_group_shift)) else 0;
+        const high = if (prio == .pens) priorityMask(v, b, @truncate(attr >> priority_group_shift)) else 0;
 
         for (0..span) |i| {
             const px = tx + @as(u32, @intCast(i));
             const pen = gfxPixel(gfx, src + if (flip_x) tile_mask - px else px);
             if (pen == transparent_pen) continue;
+            switch (prio) {
+                .none => {},
+                .pens => l.prio[x + i] = @intFromBool(high >> @intCast(pen) & 1 != 0),
+                .pass => |bit| l.prio[x + i] |= bit,
+            }
             l.color[x + i] = v.colors[color + pen];
-            if (masks) l.over[x + i] = high >> @intCast(pen) & 1 != 0;
         }
     }
 }

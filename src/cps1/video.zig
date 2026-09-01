@@ -81,8 +81,8 @@ pub fn renderLine(v: *Video, b: *const board.Board, gfx: []const u8, line: u32, 
         }
         // Only the layer the sprites are drawn straight after can cut back
         // through them, so only that one leaves a mask behind.
-        const masks = slot + 1 < chip.layer_slots and chip.slotLayer(control, slot + 1) == .sprites;
-        chip.drawLayer(v, b, gfx, &l, line, which, masks);
+        const under = slot + 1 < chip.layer_slots and chip.slotLayer(control, slot + 1) == .sprites;
+        chip.drawLayer(v, b, gfx, &l, line, which, if (under) .pens else .none);
     }
 
     chip.emit(v, &l, line);
@@ -152,7 +152,7 @@ fn drawSprite(v: *Video, b: *const board.Board, gfx: []const u8, l: *Line, line:
                 const dot = sx + px;
                 if (dot < first_visible_dot or dot >= first_visible_dot + width) continue;
                 const dx = dot - first_visible_dot;
-                if (l.over[dx]) continue;
+                if (l.prio[dx] != 0) continue;
                 const at: u32 = @intCast(if (flip_x) sprite_size - 1 - px else px);
                 const pen = gfxPixel(gfx, src + at);
                 if (pen == transparent_pen) continue;

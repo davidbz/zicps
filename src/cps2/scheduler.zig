@@ -7,14 +7,16 @@
 //! decrypted here, once, at power-on, because this is the first moment the key
 //! and the ROM it opens are in the same place.
 //!
-//! No line is drawn yet. The picture is M12, and until then a CPS-2 machine
-//! runs, counts, keeps time and makes sound over a blank screen.
+//! The line is drawn where CPS-1 draws it, out of `cps2/video.zig`, and the
+//! object list is latched at the same vblank edge. What differs is only what is
+//! latched: a bank of the board's own RAM, and the ranking that went with it.
 
 const std = @import("std");
 const m68k = @import("m68k");
 const board = @import("board");
 const cps2 = @import("cps2");
 const crypt = @import("cps2_crypt");
+const video = @import("cps2_video");
 /// The CPS-A/CPS-B pair the whole family shares.
 const chip = @import("video");
 const clock = @import("clock");
@@ -43,6 +45,16 @@ pub fn runFrame(c: *cps2.Machine, cpu: *m68k.Cpu) void {
 fn runLine(c: *cps2.Machine, cpu: *m68k.Cpu) void {
     clock.runCpu(cps2.Machine, c, cpu, c.board.cpu_hz);
     clock.runSound(&c.t, &c.sound, &c.mixer);
+
+    // Line, then interrupts: what the CPU wrote during a line is on screen for
+    // that line, and an interrupt raised at the end of one is taken from the
+    // start of the next.
+    video.renderLine(c, c.t.line);
+
+    // The object list is double-buffered in RAM of its own here rather than in
+    // graphics RAM, but vblank is still when the chip takes its copy: sprites
+    // written during a frame are drawn in the next one.
+    if (c.t.line == vblank_line) video.latchObjects(c);
 
     // The raster counters are the same two down-counters CPS-B has always had,
     // and vblank is on the line after the last visible one. An interrupt raised
