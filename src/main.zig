@@ -8,7 +8,6 @@
 
 const std = @import("std");
 const board = @import("board");
-const romset = @import("romset");
 const emu = @import("machine");
 const controls = @import("controls");
 const eeprom = @import("eeprom");
@@ -204,7 +203,7 @@ pub fn main(init: std.process.Init) !void {
             std.debug.print("--frames needs a set to run\n", .{});
             fail();
         });
-        startMachine(c, m);
+        c.start(m.b, m.rom);
         return headless(io, gpa, c, n, o.replay, o.record, o.every_frame);
     }
 
@@ -230,16 +229,6 @@ fn loadConfig(io: std.Io, gpa: std.mem.Allocator, path: []const u8) Config {
     };
     defer gpa.free(text);
     return Config.parse(text);
-}
-
-/// Power-on, and also what the Reset menu entry does: every chip back to its
-/// reset state with the same set in the board. Not the 68000's reset line —
-/// that would keep work RAM, and this is a cabinet being switched off.
-///
-/// The EEPROM does not survive this, because it is a battery, not a chip: the
-/// caller writes it out and reads it back around the call (`flushNv`).
-fn startMachine(c: *emu.Machine, m: *const Machine) void {
-    c.start(m.b, m.rom);
 }
 
 // ------------------------------------------------------------------ headless
@@ -668,7 +657,7 @@ fn windowed(
     if (args.set.len != 0) w.set = keepPath(&w.path_buf, args.set);
     if (machine.*) |*m| {
         remember(cfg, &w.ui, w.set);
-        startMachine(c, m);
+        c.start(m.b, m.rom);
         loadNv(io, c, w.set);
         describeBoard(&w.ui, m, w.set, c.suicided());
     }
@@ -725,7 +714,7 @@ fn serveRequest(w: *Window) !void {
         // make the menu pointless.
         .reset => if (w.machine.*) |*m| {
             saveNv(w);
-            startMachine(w.c, m);
+            w.c.start(m.b, m.rom);
             loadNv(w.io, w.c, w.set);
             w.frames = 0;
         },
@@ -759,7 +748,7 @@ fn loadIntoWindow(w: *Window, path: []const u8) void {
     w.machine.* = next;
     w.set = keepPath(&w.path_buf, path);
     remember(w.cfg, &w.ui, w.set);
-    startMachine(w.c, &next);
+    w.c.start(next.b, next.rom);
     loadNv(w.io, w.c, w.set);
     describeBoard(&w.ui, &next, w.set, w.c.suicided());
     w.ui.status("{s}: {d} KiB program, {d} KiB graphics", .{

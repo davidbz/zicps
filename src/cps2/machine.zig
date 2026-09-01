@@ -72,8 +72,6 @@ pub const in1_lo = 0x804010;
 pub const in2_lo = 0x804020;
 pub const volume_lo = 0x804030;
 pub const eeprom_lo = 0x804040;
-/// Written once on the way up, by every game, and decoded by nothing.
-pub const unknown_lo = 0x8040a0;
 /// Only development boards have switches here; a production one floats.
 pub const dsw_lo = 0x8040b0;
 pub const dsw_hi = 0x8040b2;

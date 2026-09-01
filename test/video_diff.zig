@@ -20,7 +20,6 @@ const std = @import("std");
 const board = @import("board");
 const boards = @import("boards");
 const cps1 = @import("cps1");
-const controls = @import("controls");
 const video = @import("video");
 const cps1_video = @import("cps1_video");
 
