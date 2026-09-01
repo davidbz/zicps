@@ -479,10 +479,10 @@ fn describeBoard(ui: *shell.Ui, m: *const Machine, set: []const u8, suicided: bo
     // The samples say which sound board this is, so the row names it: a QSound
     // set has a DL-1425 sample ROM and a plain CPS-1 one has the M6295's.
     const plain = m.b.sound() == .cps1;
-    romRow(ui, if (plain) "ADPCM" else "SAMPLES", if (plain)
-        regions.get(.oki)
+    if (plain)
+        romRow(ui, "ADPCM", regions.get(.oki), m.rom.oki.len)
     else
-        regions.get(.qsound), if (plain) m.rom.oki.len else m.rom.qsound.len);
+        romRow(ui, "SAMPLES", regions.get(.qsound), m.rom.qsound.len);
     // The Kabuki key is the one thing in the board file that is a secret
     // rather than a setting: without it the Z80 runs garbage and the cabinet
     // is silent, so whether there is one is worth a line of its own. Only a

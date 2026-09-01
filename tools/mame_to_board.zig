@@ -1,5 +1,4 @@
-//! MAME's CPS-1 tables, turned into the board files under `boards/`
-//!.
+//! MAME's CPS-1 tables, turned into the board files under `boards/`.
 //!
 //! The battery on a B-board holds numbers that are on no chip and in no dump,
 //! so everyone who emulates this hardware is reading the same transcription:
@@ -358,11 +357,22 @@ const Mame = struct {
         // and the defines below read as twenty numbers once it is spelled out.
         const src = try std.mem.replaceOwned(u8, m.arena, text, "__not_applicable__", "-1,-1,-1,-1,-1,-1,-1");
 
-        var cpsbs: std.StringHashMapUnmanaged(Cpsb) = .empty;
-        var mappers: std.StringHashMapUnmanaged(Mapper) = .empty;
-        var tables: std.StringHashMapUnmanaged([]const board.GfxRange) = .empty;
-        try m.readRanges(src, &tables);
+        var defines: Defines = .{};
+        try m.readRanges(src, &defines.ranges);
+        try m.readDefines(src, &defines);
+        try m.readConfigTable(src, defines);
+    }
 
+    /// What the `#define`s above the config table hold: a register file per
+    /// B-board, a bank mapper per PAL, and the `gfx_range` tables the mappers
+    /// point into by name.
+    const Defines = struct {
+        cpsbs: std.StringHashMapUnmanaged(Cpsb) = .empty,
+        mappers: std.StringHashMapUnmanaged(Mapper) = .empty,
+        ranges: std.StringHashMapUnmanaged([]const board.GfxRange) = .empty,
+    };
+
+    fn readDefines(m: *Mame, src: []const u8, d: *Defines) !void {
         var lines = std.mem.splitScalar(u8, src, '\n');
         while (lines.next()) |raw| {
             const line = trim(raw);
@@ -371,21 +381,27 @@ const Mame = struct {
             const name = word(rest);
             const body = trim(rest[name.len..]);
             if (std.mem.startsWith(u8, name, "CPS_B_") or std.mem.startsWith(u8, name, "HACK_B_")) {
-                try cpsbs.put(m.arena, name, try Cpsb.parse(body));
-            } else if (std.mem.startsWith(u8, name, "mapper_")) {
-                // `{ 0x8000, 0x8000, 0, 0 }, mapper_LWCHR_table`
-                const close = std.mem.indexOfScalar(u8, body, '}') orelse return error.BadTable;
-                var sizes: [board.gfx_banks]u32 = @splat(0);
-                var toks = std.mem.tokenizeAny(u8, body[0..close], " \t,{");
-                for (&sizes) |*size| size.* = @intCast(try number(toks.next() orelse return error.BadTable));
-                const table = trim(std.mem.trim(u8, body[close + 1 ..], " \t,"));
-                try mappers.put(m.arena, name, .{
-                    .sizes = sizes,
-                    .ranges = tables.get(table) orelse return error.BadTable,
-                });
+                try d.cpsbs.put(m.arena, name, try Cpsb.parse(body));
+                continue;
             }
+            if (!std.mem.startsWith(u8, name, "mapper_")) continue;
+            // `{ 0x8000, 0x8000, 0, 0 }, mapper_LWCHR_table`
+            const close = std.mem.indexOfScalar(u8, body, '}') orelse return error.BadTable;
+            var sizes: [board.gfx_banks]u32 = @splat(0);
+            var toks = std.mem.tokenizeAny(u8, body[0..close], " \t,{");
+            for (&sizes) |*size| size.* = @intCast(try number(toks.next() orelse return error.BadTable));
+            const table = trim(std.mem.trim(u8, body[close + 1 ..], " \t,"));
+            try d.mappers.put(m.arena, name, .{
+                .sizes = sizes,
+                .ranges = d.ranges.get(table) orelse return error.BadTable,
+            });
         }
+    }
 
+    /// `cps1_config_table`: one row per set, naming the two `#define`s that
+    /// were its B-board, and the handful of extra columns a set that needs
+    /// them carries.
+    fn readConfigTable(m: *Mame, src: []const u8, d: Defines) !void {
         const at = std.mem.indexOf(u8, src, "cps1_config_table[]") orelse return error.BadTable;
         const table = braces(src, at) orelse return error.BadTable;
         var rows = std.mem.splitScalar(u8, table, '{');
@@ -394,8 +410,8 @@ const Mame = struct {
             const row = try fields(m.arena, raw[0 .. std.mem.indexOfScalar(u8, raw, '}') orelse continue]);
             if (row.len < 3) break; // `{nullptr}`, the end of the table
             var config = Config{
-                .cpsb = cpsbs.get(row[1]) orelse return error.BadTable,
-                .mapper = mappers.get(row[2]) orelse return error.BadTable,
+                .cpsb = d.cpsbs.get(row[1]) orelse return error.BadTable,
+                .mapper = d.mappers.get(row[2]) orelse return error.BadTable,
             };
             // The last four columns are left off a row that has none of them.
             for (row[3..], 0..) |value, i| {
@@ -560,11 +576,17 @@ const Mame = struct {
     /// board rather than the order MAME happens to load them.
     fn map(m: *Mame, w: *std.Io.Writer, block: []const u8) !void {
         var loads: std.ArrayList(Load) = .empty;
-        var region: ?board.Region = null;
         // What this build cannot express, remembered per region rather than
         // refused on sight, so a set is only turned away for a region it
         // actually has.
         var beyond: [board.region_count]?[]const u8 = @splat(null);
+        try readLoads(m, block, &loads, &beyond);
+        try writeLoads(m, w, loads.items, beyond);
+    }
+
+    /// Every `ROM_LOAD` of a driver's block, as this build's lines.
+    fn readLoads(m: *Mame, block: []const u8, loads: *std.ArrayList(Load), beyond: *[board.region_count]?[]const u8) !void {
+        var region: ?board.Region = null;
         var lines = std.mem.splitScalar(u8, block, '\n');
         while (lines.next()) |raw| {
             const line = trim(raw);
@@ -580,23 +602,13 @@ const Mame = struct {
             const args = try fields(m.arena, parens(line, 0) orelse continue);
 
             if (std.mem.eql(u8, macro, "ROM_CONTINUE")) {
-                // The rest of a chip, landing somewhere else in the region.
-                // Nothing to continue, because the chip this belongs to was
-                // one of the lines above that could not be written down.
+                // Nothing to continue means the chip this belongs to was one of
+                // the lines above that could not be written down.
                 if (loads.items.len == 0) {
                     beyond[@intFromEnum(into)] = "a ROM_CONTINUE with no chip before it";
                     continue;
                 }
-                const prev = loads.items[loads.items.len - 1];
-                try loads.append(m.arena, .{
-                    .region = into,
-                    .dest = @intCast(try number(args[0])),
-                    .len = @intCast(try number(args[1])),
-                    .mode = prev.mode,
-                    .name = prev.name,
-                    .src = prev.src + prev.len,
-                    .crc = prev.crc,
-                });
+                try loads.append(m.arena, try continued(loads.items[loads.items.len - 1], into, args));
                 continue;
             }
 
@@ -629,12 +641,30 @@ const Mame = struct {
                 .crc = crcOf(args[3]),
             });
         }
+    }
 
+    /// The rest of a chip, landing somewhere else in the region: the same file
+    /// in the same mode, carrying on from where the line before it stopped.
+    fn continued(prev: Load, into: board.Region, args: []const []const u8) !Load {
+        return .{
+            .region = into,
+            .dest = @intCast(try number(args[0])),
+            .len = @intCast(try number(args[1])),
+            .mode = prev.mode,
+            .name = prev.name,
+            .src = prev.src + prev.len,
+            .crc = prev.crc,
+        };
+    }
+
+    /// The board file's load lines, a region at a time. A region this build
+    /// could not express is what turns the whole set away.
+    fn writeLoads(m: *Mame, w: *std.Io.Writer, loads: []const Load, beyond: [board.region_count]?[]const u8) !void {
         for (std.enums.values(board.Region)) |into| {
             if (beyond[@intFromEnum(into)]) |reason|
                 return m.give("{s} ({s} ROM)", .{ reason, @tagName(into) });
             var first = true;
-            for (loads.items) |load| {
+            for (loads) |load| {
                 if (load.region != into) continue;
                 if (first) try w.writeByte('\n');
                 first = false;

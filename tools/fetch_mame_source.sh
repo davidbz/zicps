@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Fetches the MAME files the board generator and §7.6 read.
+# Fetches the MAME files the board generator and the CPS-2 research read.
 # They land in testdata/, which is gitignored: MAME's driver is not part of
 # this emulator and is never linked into it. What ships is boards/, which is
 # committed — running this is only needed to rewrite that.

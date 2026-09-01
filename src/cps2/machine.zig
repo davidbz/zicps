@@ -14,6 +14,7 @@
 const std = @import("std");
 const board = @import("board");
 const romset = @import("romset");
+const bus = @import("bus");
 /// The CPS-A/CPS-B pair the whole family shares.
 const chip = @import("video");
 const audio = @import("audio");
@@ -26,12 +27,18 @@ const clock = @import("clock");
 /// calls by method while the functions themselves stay free.
 const file = @This();
 
-/// What a read of nothing at all returns: the bus floats high.
-pub const open_bus = 0xffff;
-
-const high_lane = 0xff00;
-const low_lane = 0x00ff;
-const both_lanes = high_lane | low_lane;
+/// The data bus itself is the same on both boards and lives in `common/`; what
+/// is this file's is the map that puts a device at an address.
+pub const open_bus = bus.open_bus;
+const high_lane = bus.high_lane;
+const low_lane = bus.low_lane;
+const both_lanes = bus.both_lanes;
+const byteWide = bus.byteWide;
+const peek = bus.peek;
+const lowMask = bus.lowMask;
+const merge = bus.merge;
+const pokeBytes = bus.pokeBytes;
+const pokeByteWide = bus.pokeByteWide;
 
 // The 68000's map, as first and last address of each window.
 pub const program_lo = 0x000000;
@@ -236,16 +243,6 @@ fn deadLatch(c: *const Machine, addr: u24) bool {
     return c.suicided and addr >= dead_output_lo and addr <= dead_output_hi;
 }
 
-/// A device wired to the low half of the data bus leaves the high half floating.
-fn byteWide(value: u8) u16 {
-    return high_lane | @as(u16, value);
-}
-
-fn peek(bytes: []const u8, offset: u32) u16 {
-    if (offset + 1 >= bytes.len) return open_bus;
-    return std.mem.readInt(u16, bytes[offset..][0..2], .big);
-}
-
 /// Controls are wired to ground, so a pressed button reads as a zero.
 fn in0(c: *const Machine) u16 {
     const low: u16 = c.inputs.pad[0] & lowMask(in0_player_bits);
@@ -274,10 +271,6 @@ fn in2(c: *const Machine) u16 {
     // Every wire here is active low except the EEPROM's, which is a chip's
     // output and not a switch to ground.
     return ~bits & ~@as(u16, in2_eeprom_do) | c.eeprom.read();
-}
-
-fn lowMask(bits: u4) u16 {
-    return (@as(u16, 1) << bits) - 1;
 }
 
 // ------------------------------------------------------------------ writes
@@ -329,21 +322,6 @@ fn poke(c: *Machine, addr: u24, value: u16, mask: u16) void {
 /// them: which bit is which is this board's wiring and not the 93C46's.
 fn eepromPins(c: *Machine, value: u16) void {
     c.eeprom.write(value & eeprom_cs != 0, value & eeprom_clk != 0, @intFromBool(value & eeprom_di != 0));
-}
-
-fn merge(reg: *u16, value: u16, mask: u16) void {
-    reg.* = (reg.* & ~mask) | (value & mask);
-}
-
-fn pokeBytes(bytes: []u8, offset: u32, value: u16, mask: u16) void {
-    if (offset + 1 >= bytes.len) return;
-    if (mask & high_lane != 0) bytes[offset] = @truncate(value >> 8);
-    if (mask & low_lane != 0) bytes[offset + 1] = @truncate(value);
-}
-
-fn pokeByteWide(bytes: []u8, offset: u32, value: u16, mask: u16) void {
-    if (offset >= bytes.len or mask & low_lane == 0) return;
-    bytes[offset] = @truncate(value);
 }
 
 // ------------------------------------------------------------------- tests

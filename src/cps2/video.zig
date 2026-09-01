@@ -79,6 +79,29 @@ const pass_bits = [_]u8{ 1, 2, 4 };
 /// down, so a sprite in front of this one is never cut by a layer this one has
 /// already covered.
 const sprite_drawn = 31;
+/// A plane value is the pass bits added up, so three passes make eight of them.
+const plane_values = 1 << pass_bits.len;
+/// A sprite's priority is the top three bits of its X word: eight levels, each
+/// with a mask of its own.
+const priority_levels = 8;
+/// A mask is one bit per plane value: bit `n` set means the sprite is hidden
+/// where the plane holds `n`.
+const all_planes: u8 = std.math.maxInt(u8);
+/// Plane value 0: no pass drew there at all.
+const bare_background: u8 = 1;
+/// What each pass covers, as such a mask: every plane value its own bit is in.
+const pass_covers = blk: {
+    var covers: [pass_bits.len]u8 = @splat(0);
+    for (&covers, pass_bits) |*c, bit| {
+        for (0..plane_values) |value| {
+            if (value & @as(usize, bit) != 0) c.* |= @as(u8, 1) << @intCast(value);
+        }
+    }
+    break :blk covers;
+};
+/// Four bits of the priority word per layer say how high that layer ranks.
+const rank_bits = 4;
+const rank_mask = 0xf;
 
 /// Draws one line of the picture. As on CPS-1 the scroll registers are read
 /// here rather than latched at the top of the frame, so a mid-frame write to
@@ -114,7 +137,7 @@ const Order = struct {
     /// Indexed by a sprite's priority: which values of the priority plane that
     /// sprite is *hidden* under, as a bit each. Plane value 0 is bare
     /// background, 1 is the back pass alone, 3 is the back two, and so on.
-    masks: [8]u8,
+    masks: [priority_levels]u8,
 };
 
 /// Works out the order out of the CPS-B layer control and the priority word the
@@ -130,8 +153,8 @@ fn layerOrder(control: u16, pri_ctrl: u16) Order {
     var rank: [chip.layer_slots]u8 = undefined;
     for (&layers, &rank, 0..) |*layer, *r, slot| {
         layer.* = chip.slotLayer(control, slot);
-        const shift: u4 = @intCast(@as(u8, @intFromEnum(layer.*)) * 4);
-        r.* = @truncate(pri_ctrl >> shift & 0xf);
+        const shift: u4 = @intCast(@as(u8, @intFromEnum(layer.*)) * rank_bits);
+        r.* = @truncate(pri_ctrl >> shift & rank_mask);
     }
 
     // Take the object list out of the order: the slots behind it shuffle up and
@@ -145,29 +168,28 @@ fn layerOrder(control: u16, pri_ctrl: u16) Order {
         layers[i + 1] = .sprites;
     }
 
-    var masks: [8]u8 = undefined;
     // A plane value with more than one pass in it takes the front pass's word
     // for it, unless a pass in front of another one also outranks it — then the
-    // sprite is over the pair. These three are that reading of the six ways two
-    // passes can overlap.
-    var mask0: u8 = 0xaa;
-    var mask1: u8 = 0xcc;
-    if (rank[0] > rank[1]) mask0 &= ~@as(u8, 0x88);
-    if (rank[0] > rank[2]) mask0 &= ~@as(u8, 0xa0);
-    if (rank[1] > rank[2]) mask1 &= ~@as(u8, 0xc0);
+    // sprite is over the pair, and the overlap comes back out of the pass
+    // behind. That is the six ways two passes can overlap, read three ways.
+    var covered = pass_covers;
+    if (rank[0] > rank[1]) covered[0] &= ~(pass_covers[0] & pass_covers[1]);
+    if (rank[0] > rank[2]) covered[0] &= ~(pass_covers[0] & pass_covers[2]);
+    if (rank[1] > rank[2]) covered[1] &= ~(pass_covers[1] & pass_covers[2]);
 
-    masks[0] = 0xff;
+    var masks: [priority_levels]u8 = undefined;
+    masks[0] = all_planes;
     for (masks[1..], 1..) |*mask, i| {
         // Under all three: hidden wherever anything drew, which is every plane
         // value but bare background.
         if (i <= rank[0] and i <= rank[1] and i <= rank[2]) {
-            mask.* = 0xfe;
+            mask.* = all_planes & ~bare_background;
             continue;
         }
         mask.* = 0;
-        if (i <= rank[0]) mask.* |= mask0;
-        if (i <= rank[1]) mask.* |= mask1;
-        if (i <= rank[2]) mask.* |= 0xf0;
+        for (covered, rank[0..covered.len]) |c, r| {
+            if (i <= r) mask.* |= c;
+        }
     }
     return .{ .layers = layers[0..pass_bits.len].*, .masks = masks };
 }
@@ -190,7 +212,7 @@ const Sprite = struct {
 
 /// Sprites are drawn last of the list first, so the first entry a game writes
 /// ends up on top of the ones after it.
-fn drawSprites(c: *cps2.Machine, l: *Line, line: u32, masks: [8]u8) void {
+fn drawSprites(c: *cps2.Machine, l: *Line, line: u32, masks: [priority_levels]u8) void {
     var i = lastSprite(c);
     while (i >= 0) : (i -= sprite_words) {
         drawSprite(c, l, line, masks, decode(c, @intCast(i)));
@@ -243,7 +265,7 @@ fn decode(c: *const cps2.Machine, at: u32) Sprite {
 
 /// One entry: a 16x16 tile, or a block of up to 16 by 16 of them from
 /// consecutive codes. Only the tiles this line crosses are drawn.
-fn drawSprite(c: *cps2.Machine, l: *Line, line: u32, masks: [8]u8, s: Sprite) void {
+fn drawSprite(c: *cps2.Machine, l: *Line, line: u32, masks: [priority_levels]u8, s: Sprite) void {
     var down: u32 = 0;
     while (down < s.ny) : (down += 1) {
         const sy = (s.y + down * sprite_size) & sprite_pos_mask;
@@ -271,7 +293,7 @@ fn blockCode(s: Sprite, col: u32, row: u32) u32 {
     return at + block_row_step * row;
 }
 
-fn drawRow(c: *cps2.Machine, l: *Line, masks: [8]u8, s: Sprite, tile: u32, sx: u32, ty: u32) void {
+fn drawRow(c: *cps2.Machine, l: *Line, masks: [priority_levels]u8, s: Sprite, tile: u32, sx: u32, ty: u32) void {
     const src = tile * sprite_pixels + ty * sprite_size;
     const mask = masks[s.priority];
 
@@ -286,7 +308,7 @@ fn drawRow(c: *cps2.Machine, l: *Line, masks: [8]u8, s: Sprite, tile: u32, sx: u
         // A sprite pixel a layer covers is still a sprite pixel: it claims the
         // plane whether or not it is the one seen there.
         const under = l.prio[dx];
-        const hidden = under < masks.len and mask >> @intCast(under) & 1 != 0;
+        const hidden = under < plane_values and mask >> @intCast(under) & 1 != 0;
         l.prio[dx] = sprite_drawn;
         if (!hidden) l.color[dx] = c.v.colors[s.color + pen];
     }

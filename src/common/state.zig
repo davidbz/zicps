@@ -61,9 +61,6 @@ fn layout(comptime T: type) []const u8 {
     }
 }
 
-/// FNV-1a over that string. Not Wyhash: this runs at comptime over tens of
-/// kilobytes, and a byte at a time with no bit tricks is the version that is
-/// cheap to prove terminates inside an eval quota.
 /// The file format for one machine and one CPU register file. Which machine is
 /// the caller's business: the format is a header and a copy of the bytes, and
 /// what it knows about the struct it copies is only which fields hold heap the
@@ -104,14 +101,20 @@ pub fn Format(comptime M: type, comptime C: type) type {
             @memcpy(out[body_at + machine_bytes ..][0..cpu_bytes], std.mem.asBytes(cpu));
         }
 
-        /// Puts the machine back. The ROMs are the ones already in `c`: a state is only
-        /// ever loaded into the set it was taken from, and the file holds no pointer
-        /// worth trusting even when it does.
-        pub fn load(c: *M, cpu: *C, in: []const u8) Error!void {
+        /// Whether this file is one of ours, of this version, from this build,
+        /// and all there. Each refusal names which of those it failed.
+        fn checkHeader(in: []const u8) Error!void {
             if (in.len < body_at or !std.mem.eql(u8, in[0..magic.len], magic)) return error.NotASaveState;
             if (std.mem.readInt(u32, in[version_at..][0..4], .little) != version) return error.WrongVersion;
             if (std.mem.readInt(u64, in[layout_at..][0..8], .little) != layout_hash) return error.FromAnotherBuild;
             if (in.len < bytes) return error.Truncated;
+        }
+
+        /// Puts the machine back. The ROMs are the ones already in `c`: a state is only
+        /// ever loaded into the set it was taken from, and the file holds no pointer
+        /// worth trusting even when it does.
+        pub fn load(c: *M, cpu: *C, in: []const u8) Error!void {
+            try checkHeader(in);
 
             const rom = c.rom;
             const b = c.board;
